@@ -663,12 +663,14 @@ def minutes_stream_ep(req: TranscriptReq) -> StreamingResponse:
     cfg = _cfg()
     label = BACKEND_LABEL[STATE["backend"]]
     mid = (req.meeting_id or "").strip()
-    # meeting_id가 있으면 저장된 전사 전체를 쓴다(클라이언트 200줄 제한 우회).
-    transcript = store.transcript_text(mid) if (mid and store.get_meta(mid)) else req.transcript
+    # meeting_id가 있으면 저장된 전사 전체 + 사용자 맥락을 쓴다(클라이언트 200줄 제한 우회, 정확도↑).
+    has_meeting = bool(mid and store.get_meta(mid))
+    transcript = store.transcript_text(mid) if has_meeting else req.transcript
+    user_ctx = store.get_context(mid) if has_meeting else ""
 
     def gen():
         try:
-            for kind, payload in brain.minutes_stream(transcript, cfg):
+            for kind, payload in brain.minutes_stream(transcript, cfg, context=user_ctx):
                 if kind == "progress":
                     yield _sse("progress", payload if isinstance(payload, dict) else {"text": payload})
                 elif kind == "result":

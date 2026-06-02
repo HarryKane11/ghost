@@ -21,12 +21,18 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
 OLLAMA_URL = "http://localhost:11434"
+
+# codex CLI 직렬화 락 — 동시 codex exec는 ~/.codex/auth.json 토큰 갱신을 두고 경쟁해
+# "refresh token already consumed by another client"로 실패한다(회의록 텍스트+이미지,
+# digest, judge가 겹칠 때). 모든 codex 호출을 한 번에 하나만 돌도록 직렬화한다.
+_CODEX_LOCK = threading.Lock()
 JUDGE_MODEL = "gemma4:e4b"
 
 ALLOWED_BLOCKS = (
@@ -80,14 +86,20 @@ ACT_SYSTEM = (
 )
 
 MINUTES_SYSTEM = (
-    "너는 'Ghost', 회의 비서다. 아래 회의 전사 전체를 보고 회의록을 작성한다. "
-    "회의에서 쓰인 언어와 같은 언어로 작성한다(한국어 회의면 한국어).\n"
+    "너는 'Ghost', 회의 비서다. 아래 회의 전사 '전체'를 처음부터 끝까지 읽고 흐름을 이해한 뒤, "
+    "사람이 정리한 듯 상세하고 구조적인 회의록을 작성한다. 전사가 필러워드·오탈자로 거칠더라도 "
+    "의미를 파악해 매끄럽게 정제한다. 회의에서 쓰인 언어로 작성한다(한국어 회의면 한국어).\n"
     "반드시 JSON 한 개만 출력: "
     '{"title": str, "spoken": str, "intent": "note", "blocks": [...]}\n'
-    "blocks 권장 순서(heading 텍스트는 제목만, 괄호 설명 금지):\n"
-    "1) heading \"회의 요약\" → text: 핵심 2~3문장\n"
-    "2) heading \"주요 결정\" → list\n"
-    "3) heading \"액션 아이템\" → list(담당·기한 있으면 포함)\n"
+    f"{ALLOWED_BLOCKS}\n"
+    "blocks 권장 구성(heading 텍스트는 제목만, 괄호 설명 금지):\n"
+    "1) heading \"회의 요약\" → text: 회의 목적·핵심 결과 3~5문장\n"
+    "2) heading \"주요 논의\" → 안건별로 heading(소제목) + text/list로 무슨 얘기가 오갔는지 상세히. "
+    "쟁점·근거·이견이 있었다면 함께. 회의 길이에 비례해 충실하게.\n"
+    "3) heading \"결정 사항\" → list (확정된 것만, 명확히)\n"
+    "4) heading \"액션 아이템\" → table[담당 | 할 일 | 기한] 또는 list (담당·기한 있으면 반드시 포함)\n"
+    "5) (있으면) heading \"미해결·후속\" → list\n"
+    "원칙: 전사에 실제로 있는 내용만. 없는 걸 지어내지 말 것. 고유명사는 [회의 배경]을 참고해 정확히 표기.\n"
     "spoken: \"회의록 정리했어요\" 정도의 짧은 한마디.\n"
     f"{WORKLOAD_DECISION_RULES}"
 )
@@ -230,7 +242,8 @@ def _codex_text(system: str, user: str, model: Optional[str] = None, timeout: in
     cmd += ["-m", model or "gpt-5.4-mini"]
     cmd.append(f"{system}\n\n{user}")
     try:
-        subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+        with _CODEX_LOCK:  # codex 호출 직렬화(토큰 레이스 방지)
+            subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
         raw = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
     except Exception:
         raw = ""
@@ -547,6 +560,7 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
         cmd += ["-m", cfg.codex_model]
     cmd.append(f"{system}{_lang_line(cfg)}\n\n[맥락]\n{context}\n\n[요청]\n{query}")
 
+    _CODEX_LOCK.acquire()  # codex 직렬화(토큰 레이스 방지). finally에서 해제.
     proc = subprocess.Popen(
         cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, text=True, bufsize=1,
@@ -627,9 +641,12 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
             if out:
                 yield out
         proc.wait(timeout=240)
+    except Exception as ex:  # noqa: BLE001 — 타임아웃 등은 우아하게 강등(예외 전파 금지)
+        error_msg = error_msg or str(ex)
     finally:
         if proc.poll() is None:
             proc.kill()
+        _CODEX_LOCK.release()
 
     spec = _extract_json(final_text)
     if spec is None and error_msg:
@@ -646,18 +663,22 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
     yield ("result", _normalize_spec(spec, fallback_text=fallback))
 
 
-def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None):
-    """회의록 생성: codex가 image_gen으로 손글씨 회의록 이미지(minutes.png)를 만들고,
-    구조화 회의록 JSON을 출력. 생성된 이미지를 image 블록으로 주입해 결과로 반환."""
+def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: str = ""):
+    """회의록 생성: codex가 전사 전체를 이해해 상세 회의록 JSON을 만들고(손글씨 이미지도),
+    결과로 반환. context(사용자 맥락·고유명사)가 있으면 정확도↑.
+
+    전사 + 맥락을 함께 넘겨 codex가 회의를 '이해'한 뒤 주제별로 상세 정리하게 한다."""
     cfg = cfg or BrainConfig()
+    ctx_block = (f"[회의 배경(사용자 제공) — 고유명사·맥락 참고]\n{context}\n\n" if context.strip() else "")
+    user_input = f"{ctx_block}[회의 전사 전체]\n{transcript}"
     if cfg.backend != "codex":
         yield ("progress", "회의록 정리 중…")
-        yield ("result", act("이 회의의 회의록을 작성해줘.", transcript, cfg, MINUTES_SYSTEM))
+        yield ("result", act("아래 회의 전사를 이해해 상세 회의록을 작성해줘.", user_input, cfg, MINUTES_SYSTEM))
         return
 
-    # 1) 구조화 회의록(요약·결정·액션) — 먼저 빠르게 내보낸다(이미지 기다리다 타임아웃 방지).
+    # 1) 구조화 회의록(요약·논의·결정·액션) — 먼저 빠르게 내보낸다(이미지 기다리다 타임아웃 방지).
     yield ("progress", "회의록 정리 중…")
-    spec = act("이 회의의 회의록을 작성해줘.", transcript, cfg, MINUTES_SYSTEM)
+    spec = act("아래 회의 전사를 처음부터 끝까지 이해한 뒤, 주제별로 상세 회의록을 작성해줘.", user_input, cfg, MINUTES_SYSTEM)
     spec["title"] = spec.get("title") or "회의록"
     yield ("result", spec)  # ← 텍스트 회의록 먼저 표시(클라이언트 타임아웃 해제)
 
@@ -668,10 +689,11 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None):
         if os.path.exists(img_path):
             os.unlink(img_path)
         img_prompt = MINUTES_IMG_PROMPT.format(path=img_path, transcript=transcript)
-        subprocess.run(
-            ["codex", "exec", "--skip-git-repo-check", "-c", 'model_reasoning_effort="medium"', img_prompt],
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180,
-        )
+        with _CODEX_LOCK:  # codex 직렬화(토큰 레이스 방지)
+            subprocess.run(
+                ["codex", "exec", "--skip-git-repo-check", "-c", 'model_reasoning_effort="medium"', img_prompt],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180,
+            )
         if os.path.exists(img_path) and os.path.getsize(img_path) > 1000:
             data = base64.b64encode(open(img_path, "rb").read()).decode()
             spec.setdefault("blocks", [])

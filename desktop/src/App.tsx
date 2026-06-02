@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, SlidersHorizontal, AudioLines, Square,
-  HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText,
+  HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Ghost,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -107,6 +107,18 @@ function CommandStep({ item, active }: { item: api.ProgressItem; active: boolean
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-slate"><span className="text-spark-deep">$</span> {cmd}</pre>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 유령이 좌우로 스윽 날아가는 스트립. 스트리밍/듣는 중 연출. */
+function GhostFly({ dur = 3.1, size = 16, className }: { dur?: number; size?: number; className?: string }) {
+  return (
+    <div className={cn("pointer-events-none relative overflow-hidden", className)} style={{ height: size + 4 }} aria-hidden>
+      <div className="fly-trail absolute inset-x-0 top-1/2 h-px -translate-y-1/2" style={{ ["--fly-dur" as any]: `${dur}s` }} />
+      <span className="phantom-fly text-spark-deep" style={{ ["--fly-dur" as any]: `${dur}s` }}>
+        <Ghost style={{ width: size, height: size }} />
+      </span>
     </div>
   );
 }
@@ -685,8 +697,18 @@ export default function App() {
               const q = tq.trim().toLowerCase();
               const shown = q ? transcript.filter((t) => t.text.toLowerCase().includes(q)) : transcript;
               if (q && shown.length === 0) return <p className="px-1 py-2 text-center text-[12px] text-stone">{t("trans.noResults", { q: tq })}</p>;
-              return shown.map((t) => <p key={t.id} className="text-[13px] leading-relaxed text-slate">{t.text}</p>);
+              // 새 줄은 유령 커서가 좌→우로 쓸고 지나간 듯(ghost-line) 드러난다.
+              return shown.map((t) => <p key={t.id} className="ghost-line text-[13px] leading-relaxed text-slate">{t.text}</p>);
             })()}
+            {/* 듣는 중: 유령이 좌우로 날며 다음 문장을 기다리는 shimmer */}
+            {active && !tq.trim() && !demoOn && (
+              <div className="relative mt-1 flex items-center gap-2">
+                <div className="relative h-4 flex-1 overflow-hidden rounded-full">
+                  <div className="mist absolute inset-y-0 left-0 h-2 w-3/5 self-center rounded-full" style={{ top: "50%", transform: "translateY(-50%)" }} />
+                  <span className="phantom-fly text-spark-deep/70" style={{ ["--fly-dur" as any]: "2.6s" }}><Ghost className="size-3.5" /></span>
+                </div>
+              </div>
+            )}
             <div ref={transEndRef} />
           </div>
         </section>
@@ -736,7 +758,8 @@ export default function App() {
                   </div>
                   {it.status === "working" ? (
                     <div className="relative space-y-3 py-1">
-                      <span className="soul pointer-events-none absolute right-2 top-0 size-1 rounded-full bg-spark" style={{ ["--sx" as any]: "-8px", ["--sd" as any]: "3.4s" }} />
+                      {/* 유령이 좌우로 스윽 날아다니는 연출 */}
+                      <GhostFly dur={3.1} size={18} className="-mt-1" />
                       {it.ack && <p className="wisp text-[13px] italic leading-relaxed text-steel">{it.ack}</p>}
                       <GhostLoader />
                       <div className="space-y-1.5">

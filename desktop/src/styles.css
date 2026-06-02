@@ -224,8 +224,40 @@ body {
 }
 .phantom-roam { animation: phantom-roam 15s ease-in-out infinite, phantom-roam-fade 8s ease-in-out infinite; will-change: transform, opacity; }
 
+/* 유령이 좌우로 스윽 날아가는 sweep (스트리밍·듣는 중 표시). 컨테이너는 relative+overflow-hidden. */
+@keyframes phantom-fly {
+  0%   { left: -14%; transform: rotate(-5deg) translateY(0)  scaleX(1);  opacity: 0; }
+  12%  { opacity: .9; }
+  50%  { transform: rotate(4deg) translateY(-4px) scaleX(1.04); }
+  88%  { opacity: .9; }
+  100% { left: 114%; transform: rotate(-5deg) translateY(0) scaleX(1);  opacity: 0; }
+}
+.phantom-fly {
+  position: absolute; top: 50%; margin-top: -9px;
+  animation: phantom-fly var(--fly-dur, 3.1s) cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: left, transform, opacity;
+  filter: drop-shadow(0 2px 8px color-mix(in srgb, var(--spark) 40%, transparent));
+}
+/* 유령이 지나간 자리에 남는 옅은 잔상 트레일 */
+@keyframes fly-trail { 0%,100% { opacity: .0; } 50% { opacity: .5; } }
+.fly-trail {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--spark) 22%, transparent), transparent);
+  animation: fly-trail var(--fly-dur, 3.1s) cubic-bezier(0.45,0,0.55,1) infinite;
+}
+
+/* 전사 한 줄이 유령 커서처럼 좌→우로 쓸려 나타남(글자가 그 뒤로 드러남) */
+@keyframes ghost-line {
+  0%   { opacity: 0; clip-path: inset(0 100% 0 0); filter: blur(3px); }
+  55%  { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; clip-path: inset(0 0 0 0); filter: blur(0); }
+}
+.ghost-line { animation: ghost-line .5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
 @media (prefers-reduced-motion: reduce) {
-  .phantom, .phantom-glow, .phantom-inner, .phantom-roam { animation: none !important; }
+  .phantom, .phantom-glow, .phantom-inner, .phantom-roam,
+  .phantom-fly, .fly-trail, .ghost-line { animation: none !important; }
+  .phantom-fly { display: none; }
+  .ghost-line { clip-path: none; opacity: 1; filter: none; }
 }
 
 /* 손글씨 회의록 종이 */

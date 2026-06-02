@@ -185,8 +185,27 @@ def end_meeting(meeting_id: str) -> Optional[dict]:
 
 
 # ── 전사 실시간 누적 ────────────────────────────────────────────────────────
+import re as _re
+
+# 문장 종결 부호(한국어·영어·중국어). 이 뒤에서 문장을 끊어 md에 한 줄씩 적는다.
+_SENT_SPLIT = _re.compile(r"(?<=[.!?。！？…])\s+")
+
+
+def _append_md(folder: Path, text: str) -> None:
+    """전사 텍스트를 문장 마침 기준으로 transcript.md에 실시간 누적(사람이 읽기 쉬운 형식)."""
+    md_path = folder / "transcript.md"
+    if not md_path.exists():
+        title = (_read_json(folder / "meeting.json") or {}).get("title", "회의")
+        md_path.write_text(f"# {title} — 전사\n\n", encoding="utf-8")
+    # 문장 단위로 쪼개 한 줄씩(종결 부호가 없으면 통째로 한 줄).
+    sentences = [s.strip() for s in _SENT_SPLIT.split(text) if s.strip()]
+    if sentences:
+        with open(md_path, "a", encoding="utf-8") as f:
+            f.write("\n".join(sentences) + "\n")
+
+
 def append_transcript(meeting_id: str, text: str, source: str = "mic") -> None:
-    """발화 1건을 transcript.jsonl에 즉시 append하고 utterance_count를 증가."""
+    """발화 1건을 transcript.jsonl에 즉시 append하고, transcript.md(문장 단위)도 갱신."""
     text = (text or "").strip()
     if not text:
         return
@@ -197,6 +216,7 @@ def append_transcript(meeting_id: str, text: str, source: str = "mic") -> None:
         line = json.dumps({"t": _now_iso(), "text": text, "source": source}, ensure_ascii=False)
         with open(folder / "transcript.jsonl", "a", encoding="utf-8") as f:
             f.write(line + "\n")
+        _append_md(folder, text)  # 문장 마침 기준 md 실시간 업데이트
         meta = _read_json(folder / "meeting.json")
         if meta is not None:
             meta["utterance_count"] = int(meta.get("utterance_count", 0)) + 1
