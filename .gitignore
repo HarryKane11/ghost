@@ -1,0 +1,43 @@
+# ── Secrets (절대 커밋 금지) ──────────────────────────────────
+.env
+.env.*
+*.env
+!.env.example
+
+# ── Python (local/) ──────────────────────────────────────────
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── Node / Vite / Next (desktop/, web/) ──────────────────────
+node_modules/
+dist/
+dist-ssr/
+.next/
+out/
+*.tsbuildinfo
+
+# ── Electron 빌드 산출물 ─────────────────────────────────────
+release/
+desktop/release/
+
+# ── 로컬 모델·캐시 (런타임에 다운로드) ───────────────────────
+*.gguf
+*.safetensors
+*.onnx
+models/
+
+# ── OS / 에디터 ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+
+# ── Ghost 회의 데이터(사용자 로컬) ───────────────────────────
+Ghost/
+.ghost/

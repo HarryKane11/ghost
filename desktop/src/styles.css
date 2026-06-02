@@ -1,0 +1,241 @@
+@import "tailwindcss";
+
+/* Ghost design tokens — monochrome premium, light default (Mintlify-derived). */
+:root {
+  --ink: #0a0a0a;
+  --charcoal: #1c1c1e;
+  --slate: #3a3a3c;
+  --steel: #5a5a5c;
+  --stone: #888888;
+  --muted: #a8a8aa;
+  --canvas: #ffffff;
+  --surface: #f7f7f7;
+  --surface-soft: #fafafa;
+  --hairline: #e5e5e5;
+  --spark: #00d4a4;
+  --spark-deep: #00b48a;
+  --spark-soft: #7cebcb;
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: #ffffff;
+  --border: var(--hairline);
+  --ring: var(--ink);
+}
+
+.dark {
+  --ink: #ffffff;
+  --charcoal: #ededed;
+  --slate: #cfcfd1;
+  --steel: #b3b3b3;
+  --stone: #8a8a8c;
+  --muted: #6a6a6c;
+  --canvas: #0a0a0a;
+  --surface: #141416;
+  --surface-soft: #0f0f10;
+  --hairline: #1f1f1f;
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --primary: #ffffff;
+  --primary-foreground: #0a0a0a;
+  --border: var(--hairline);
+  --ring: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-ink: var(--ink);
+  --color-charcoal: var(--charcoal);
+  --color-slate: var(--slate);
+  --color-steel: var(--steel);
+  --color-stone: var(--stone);
+  --color-muted: var(--muted);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-hairline: var(--hairline);
+  --color-spark: var(--spark);
+  --color-spark-deep: var(--spark-deep);
+  --color-spark-soft: var(--spark-soft);
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+}
+
+* { border-color: var(--border); }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+::selection { background: var(--ink); color: var(--canvas); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--stone) 40%, transparent); border-radius: 9999px; border: 3px solid transparent; background-clip: content-box; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.animate-rise { animation: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes pulse-ring { 0%,100% { opacity: .5; transform: scale(.85);} 50% { opacity:1; transform: scale(1);} }
+.animate-pulse-ring { animation: pulse-ring 1.6s ease-in-out infinite; }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, color-mix(in srgb, var(--hairline) 60%, var(--surface)) 37%, var(--surface) 63%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Ghost / Jarvis 연출 ───────────────────────────────────────── */
+
+/* 유령처럼 흐릿하게 나타나는 카드 materialize */
+@keyframes materialize {
+  0%   { opacity: 0; transform: translateY(14px) scale(.985); filter: blur(8px); }
+  60%  { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.materialize { animation: materialize .6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes dematerialize {
+  to { opacity: 0; transform: translateY(-8px) scale(.98); filter: blur(6px); }
+}
+.dematerialize { animation: dematerialize .35s ease-in both; }
+
+/* 리스닝 오브 — 숨쉬는 글로우 */
+@keyframes breathe {
+  0%,100% { transform: scale(1); }
+  50%     { transform: scale(1.05); }
+}
+.orb-breathe { animation: breathe 4s ease-in-out infinite; }
+
+/* 오브 주변 떠다니는 입자 (유령 기운) */
+@keyframes drift {
+  0%   { opacity: 0; transform: translate(0,0) scale(.6); }
+  30%  { opacity: .7; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1); }
+}
+.particle { animation: drift var(--dur, 3.2s) ease-out infinite; animation-delay: var(--delay, 0s); }
+
+/* 스파크 반짝임 */
+@keyframes twinkle {
+  0%,100% { opacity: .4; transform: scale(.85) rotate(0deg); }
+  50%     { opacity: 1; transform: scale(1.1) rotate(8deg); }
+}
+.twinkle { animation: twinkle 2.6s ease-in-out infinite; }
+
+/* 전사 티커 라인 페이드 */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.fade-in { animation: fadeIn .4s ease both; }
+
+/* 사고중 점 */
+@keyframes thinkDot { 0%,80%,100% { opacity:.25 } 40% { opacity:1 } }
+.think-dot { animation: thinkDot 1.2s infinite; }
+
+/* 은은한 배경 오로라 */
+@keyframes aurora {
+  0%   { transform: translate(-10%, -6%) rotate(0deg); }
+  50%  { transform: translate(8%, 6%) rotate(12deg); }
+  100% { transform: translate(-10%, -6%) rotate(0deg); }
+}
+.aurora { animation: aurora 18s ease-in-out infinite; }
+
+/* ── 유령스러운 스트리밍 연출 ──────────────────────────────────── */
+
+/* 위스프: 진행 메시지가 안개처럼 떠오름 */
+@keyframes wisp-in {
+  0%   { opacity: 0; transform: translateY(8px) translateX(-2px); filter: blur(7px); letter-spacing: .04em; }
+  60%  { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0); filter: blur(0); letter-spacing: normal; }
+}
+.wisp { animation: wisp-in .7s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* 현재 진행 단계가 유령처럼 일렁임 */
+@keyframes haze {
+  0%,100% { opacity: .65; filter: blur(.2px); }
+  50%     { opacity: 1;   filter: blur(0); text-shadow: 0 0 10px color-mix(in srgb, var(--spark) 45%, transparent); }
+}
+.haze { animation: haze 2.4s ease-in-out infinite; }
+
+/* 미스트 바: 스켈레톤 대신 흐르는 안개 */
+@keyframes mist-flow { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+.mist {
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--hairline) 50%, transparent) 0%,
+    color-mix(in srgb, var(--spark) 14%, transparent) 35%,
+    color-mix(in srgb, var(--hairline) 50%, transparent) 70%);
+  background-size: 220% 100%;
+  animation: mist-flow 2.6s linear infinite;
+  filter: blur(.3px);
+}
+
+/* 떠다니는 영혼 점 */
+@keyframes soul {
+  0%   { opacity: 0; transform: translate(0,4px) scale(.6); }
+  40%  { opacity: .9; }
+  100% { opacity: 0; transform: translate(var(--sx,6px), -14px) scale(1.1); }
+}
+.soul { animation: soul var(--sd, 2.8s) ease-in-out infinite; }
+
+/* 영혼 코어 펄스(스피너 대체) */
+@keyframes soul-pulse {
+  0%,100% { transform: scale(.8); opacity: .5; box-shadow: 0 0 0 0 color-mix(in srgb, var(--spark) 40%, transparent); }
+  50%     { transform: scale(1); opacity: 1; box-shadow: 0 0 12px 2px color-mix(in srgb, var(--spark) 50%, transparent); }
+}
+.soul-pulse { animation: soul-pulse 1.5s ease-in-out infinite; }
+
+/* ── 유령 출몰 애니메이션 ─────────────────────────────────────────
+   좌우로 뽈뽈 떠다니고(drift), 흐릿하게 사라졌다 다시 나타난다(phase).
+   세 레이어(drift / glow / phase)를 서로 다른 주기로 겹쳐 유기적으로 보이게.        */
+@keyframes phantom-drift {
+  0%   { transform: translate(-16px, 3px) rotate(-3deg); }
+  25%  { transform: translate(11px, -9px) rotate(2.5deg); }
+  50%  { transform: translate(18px, 5px) rotate(3.5deg); }
+  75%  { transform: translate(-9px, -7px) rotate(-2.5deg); }
+  100% { transform: translate(-16px, 3px) rotate(-3deg); }
+}
+@keyframes phantom-phase {
+  0%, 100% { opacity: .92; filter: blur(0); }
+  32%      { opacity: .18; filter: blur(3.5px); }   /* 흐릿하게 옅어지고 */
+  48%      { opacity: 0;   filter: blur(7px); }      /* 잠깐 소멸 */
+  64%      { opacity: .22; filter: blur(3px); }      /* 스르륵 다시 나타남 */
+}
+@keyframes phantom-glow {
+  0%, 100% { filter: drop-shadow(0 6px 16px color-mix(in srgb, var(--spark) 20%, transparent)); }
+  50%      { filter: drop-shadow(0 12px 30px color-mix(in srgb, var(--spark) 48%, transparent)); }
+}
+.phantom       { animation: phantom-drift 7s ease-in-out infinite; will-change: transform; }
+.phantom-glow  { animation: phantom-glow 4.3s ease-in-out infinite; }
+.phantom-inner { animation: phantom-phase 5.5s ease-in-out infinite; will-change: opacity, filter; }
+
+/* 배경에서 크게 배회하는 옅은 유령 (ambient) */
+@keyframes phantom-roam {
+  0%   { transform: translate(0,0) rotate(0deg) scale(1); }
+  50%  { transform: translate(46px, -22px) rotate(5deg) scale(1.05); }
+  100% { transform: translate(0,0) rotate(0deg) scale(1); }
+}
+@keyframes phantom-roam-fade {
+  0%, 100% { opacity: .05; }
+  50%      { opacity: .11; }
+}
+.phantom-roam { animation: phantom-roam 15s ease-in-out infinite, phantom-roam-fade 8s ease-in-out infinite; will-change: transform, opacity; }
+
+@media (prefers-reduced-motion: reduce) {
+  .phantom, .phantom-glow, .phantom-inner, .phantom-roam { animation: none !important; }
+}
+
+/* 손글씨 회의록 종이 */
+.paper {
+  background-color: #fcfbf7;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--spark) 22%, transparent) .06em, transparent .06em);
+  background-size: 100% 1.9em;
+  line-height: 1.9em;
+}
+.dark .paper { background-color: #15151a; }
+.hand-ko { font-family: "Nanum Pen Script", cursive; }
+.hand-en { font-family: "Caveat", cursive; }

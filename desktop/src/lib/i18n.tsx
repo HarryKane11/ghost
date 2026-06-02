@@ -1,0 +1,250 @@
+import { createContext, useContext, useMemo, type ReactNode } from "react";
+
+export type Lang = "ko" | "en" | "zh";
+
+export const LANGS: { id: Lang; label: string }[] = [
+  { id: "ko", label: "한국어" },
+  { id: "en", label: "English" },
+  { id: "zh", label: "中文" },
+];
+
+/** UI 문자열 사전. {n}, {q} 등은 t(key, vars)로 치환. */
+const DICT: Record<string, Record<Lang, string>> = {
+  // 헤더
+  "header.help": { ko: "사용법 (⌘/)", en: "Help (⌘/)", zh: "帮助 (⌘/)" },
+  "header.menu": { ko: "메뉴", en: "Menu", zh: "菜单" },
+  "header.voiceOn": { ko: "음성 켜기", en: "Voice on", zh: "开启语音" },
+  "header.voiceOff": { ko: "음성 끄기", en: "Voice off", zh: "关闭语音" },
+  "header.theme": { ko: "테마", en: "Theme", zh: "主题" },
+  "header.connected": { ko: "연결됨", en: "Connected", zh: "已连接" },
+  "header.loginNeeded": { ko: "로그인 필요", en: "Login needed", zh: "需要登录" },
+  "header.backendErr": { ko: "백엔드 끊김", en: "Backend down", zh: "后端断开" },
+  "header.refresh": { ko: "새로고침", en: "Refresh", zh: "刷新" },
+
+  // 전사 패널
+  "trans.title": { ko: "실시간 전사", en: "Live transcript", zh: "实时转写" },
+  "trans.titleEdit": { ko: "회의 제목 (클릭해 편집)", en: "Meeting title (click to edit)", zh: "会议标题（点击编辑）" },
+  "trans.titlePlaceholder": { ko: "회의 제목", en: "Meeting title", zh: "会议标题" },
+  "trans.mic": { ko: "마이크", en: "Mic", zh: "麦克风" },
+  "trans.system": { ko: "시스템", en: "System", zh: "系统" },
+  "trans.export": { ko: "회의 기록 내보내기 (.md 저장)", en: "Export meeting (.md)", zh: "导出记录 (.md)" },
+  "trans.clear": { ko: "세션 비우기", en: "Clear session", zh: "清空会话" },
+  "trans.search": { ko: "전사 검색", en: "Search transcript", zh: "搜索转写" },
+  "trans.searchPlaceholder": { ko: "전사 검색…", en: "Search transcript…", zh: "搜索转写…" },
+  "trans.noResults": { ko: "‘{q}’ 검색 결과 없음", en: "No results for ‘{q}’", zh: "未找到‘{q}’" },
+  "trans.micDefault": { ko: "기본 마이크", en: "Default mic", zh: "默认麦克风" },
+  "trans.loadingModel": { ko: "전사 모델 준비 중…", en: "Loading model…", zh: "正在加载模型…" },
+  "trans.demoPlaying": { ko: "데모 재생 중", en: "Demo playing", zh: "演示中" },
+  "trans.listening": { ko: "듣는 중", en: "Listening", zh: "聆听中" },
+  "trans.waiting": { ko: "대기", en: "Idle", zh: "待机" },
+  "trans.off": { ko: "꺼짐", en: "Off", zh: "关闭" },
+  "trans.emptyActive": { ko: "말하면 여기에 전사돼요", en: "Speak and it appears here", zh: "说话后会显示在这里" },
+  "trans.emptyIdle": { ko: "아래 마이크를 켜서 회의를 시작하세요", en: "Turn on the mic below to start", zh: "打开下方麦克风开始" },
+
+  // 피드(우측)
+  "feed.emptyTitle": { ko: "회의를 들으며 필요한 걸 카드로 띄워요.", en: "Ghost listens and surfaces what you need as cards.", zh: "Ghost 边听边把所需信息做成卡片。" },
+  "feed.emptySub": { ko: "아래에 직접 물어봐도 됩니다.", en: "You can also ask directly below.", zh: "也可以在下方直接提问。" },
+  "feed.demo": { ko: "데모 회의 들어보기", en: "Try a demo meeting", zh: "试听演示会议" },
+  "feed.demoBanner": { ko: "데모 회의 재생 중", en: "Demo meeting playing", zh: "演示会议播放中" },
+  "feed.stop": { ko: "중지", en: "Stop", zh: "停止" },
+
+  // 카드
+  "card.close": { ko: "닫기", en: "Close", zh: "关闭" },
+  "card.pin": { ko: "카드 고정", en: "Pin card", zh: "固定卡片" },
+  "card.unpin": { ko: "고정 해제", en: "Unpin", zh: "取消固定" },
+  "card.listen": { ko: "듣기", en: "Listen", zh: "朗读" },
+  "card.cmdRunning": { ko: "실행 중", en: "Running", zh: "执行中" },
+  "card.cmdDone": { ko: "완료", en: "Done", zh: "完成" },
+  "card.cmdFailed": { ko: "실패", en: "Failed", zh: "失败" },
+  "card.cmd": { ko: "명령", en: "Command", zh: "命令" },
+  "card.timeoutTitle": { ko: "시간 초과", en: "Timed out", zh: "超时" },
+  "card.timeoutBody": { ko: "응답이 너무 오래 걸려 중단했어요.", en: "The response took too long, so I stopped.", zh: "响应耗时过长，已中止。" },
+  "card.errorTitle": { ko: "오류", en: "Error", zh: "错误" },
+  "card.errorBody": { ko: "작업에 실패했어요. 다시 시도해 주세요.", en: "Something went wrong. Please try again.", zh: "操作失败，请重试。" },
+
+  // 입력/푸터
+  "footer.placeholder": { ko: "Ghost에게 물어보거나 회의록을 요청…  (⌘K)", en: "Ask Ghost or request minutes…  (⌘K)", zh: "向 Ghost 提问或请求纪要…  (⌘K)" },
+
+  // 진행 로딩(유령 문장)
+  "ghost.l0": { ko: "유령이 단서를 따라가는 중…", en: "The ghost follows a trail…", zh: "幽灵正循着线索…" },
+  "ghost.l1": { ko: "안갯속을 더듬는 중…", en: "Feeling through the mist…", zh: "在迷雾中摸索…" },
+  "ghost.l2": { ko: "희미한 흔적을 모으는 중…", en: "Gathering faint traces…", zh: "收集微弱的踪迹…" },
+  "ghost.l3": { ko: "조용히 살펴보는 중…", en: "Quietly looking around…", zh: "悄悄查看中…" },
+  "ghost.l4": { ko: "기억의 안개를 헤치는 중…", en: "Parting the fog of memory…", zh: "拨开记忆的迷雾…" },
+  "ghost.l5": { ko: "흩어진 조각을 잇는 중…", en: "Connecting scattered pieces…", zh: "拼接零散的碎片…" },
+  "ghost.l6": { ko: "스르륵 정보를 모으는 중…", en: "Drifting in to gather info…", zh: "悄然汇集信息…" },
+
+  // 토스트
+  "toast.sttFail": { ko: "전사 실패 — 백엔드 STT 상태를 확인하세요", en: "Transcription failed — check the STT backend", zh: "转写失败 — 请检查 STT 后端" },
+  "toast.minutesShort": { ko: "회의록을 만들 전사 내용이 부족해요", en: "Not enough transcript to make minutes", zh: "转写内容不足，无法生成纪要" },
+  "toast.busy": { ko: "앞 작업을 끝내는 중이에요", en: "Finishing the previous task…", zh: "正在完成上一个任务…" },
+  "toast.backendFail": { ko: "백엔드 변경 실패", en: "Failed to switch backend", zh: "切换后端失败" },
+  "toast.exportEmpty": { ko: "내보낼 내용이 없어요", en: "Nothing to export", zh: "没有可导出的内容" },
+  "toast.exportSaved": { ko: "회의 기록을 .md 파일로 저장했어요", en: "Saved the meeting as a .md file", zh: "已保存为 .md 文件" },
+  "toast.exportCopied": { ko: "회의 기록을 Markdown으로 복사했어요", en: "Copied the meeting as Markdown", zh: "已复制为 Markdown" },
+  "toast.exportFail": { ko: "내보내기 실패", en: "Export failed", zh: "导出失败" },
+  "toast.cleared": { ko: "세션을 비웠어요", en: "Session cleared", zh: "会话已清空" },
+  "toast.clearWhileActive": { ko: "청취를 멈춘 뒤 비울 수 있어요", en: "Stop listening before clearing", zh: "请先停止聆听再清空" },
+  "toast.demoWhileActive": { ko: "청취 중에는 데모를 켤 수 없어요", en: "Can’t start the demo while listening", zh: "聆听时无法开始演示" },
+  "err.micPermission": { ko: "마이크 권한이 필요합니다 (시스템 설정 → 개인정보 보호 → 마이크)", en: "Microphone permission required (System Settings → Privacy → Microphone)", zh: "需要麦克风权限（系统设置 → 隐私 → 麦克风）" },
+  "err.noDevice": { ko: "오디오 장치를 찾지 못했어요", en: "No audio device found", zh: "未找到音频设备" },
+  "err.deviceBusy": { ko: "마이크를 다른 앱이 사용 중이에요", en: "The mic is in use by another app", zh: "麦克风正被其他应用占用" },
+  "err.capture": { ko: "캡처 실패", en: "Capture failed", zh: "捕获失败" },
+
+  // 설정 메뉴
+  "settings.title": { ko: "설정 · 관리", en: "Settings", zh: "设置" },
+  "settings.replayGuide": { ko: "가이드 다시 보기", en: "Replay guide", zh: "重看引导" },
+  "settings.language": { ko: "언어", en: "Language", zh: "语言" },
+  "settings.codexTitle": { ko: "Codex 연결 (ChatGPT 구독 auth)", en: "Codex (ChatGPT subscription)", zh: "Codex（ChatGPT 订阅）" },
+  "settings.codexConnected": { ko: "Codex가 ChatGPT 구독 인증으로 동작합니다 (웹·브라우저·커넥터 포함).", en: "Codex runs via your ChatGPT subscription (web, browser, connectors).", zh: "Codex 通过你的 ChatGPT 订阅运行（网页、浏览器、连接器）。" },
+  "settings.codexLogin": { ko: "로그인 필요 — 터미널에서 codex login 후 다시 여세요.", en: "Login needed — run `codex login` in a terminal, then reopen.", zh: "需要登录 — 在终端运行 `codex login` 后重开。" },
+  "settings.model": { ko: "모델", en: "Model", zh: "模型" },
+  "settings.modelDefault": { ko: "기본값 (config)", en: "Default (config)", zh: "默认 (config)" },
+  "settings.effort": { ko: "추론 강도", en: "Reasoning", zh: "推理强度" },
+  "settings.effortLow": { ko: "낮음 (빠름)", en: "Low (fast)", zh: "低（快）" },
+  "settings.effortMed": { ko: "보통", en: "Medium", zh: "中" },
+  "settings.effortHigh": { ko: "높음 (정확)", en: "High (accurate)", zh: "高（准确）" },
+  "settings.apiKeyTitle": { ko: "OpenAI API 키 (openai 백엔드용)", en: "OpenAI API key (for openai backend)", zh: "OpenAI API 密钥（openai 后端）" },
+  "settings.save": { ko: "저장", en: "Save", zh: "保存" },
+  "settings.saved": { ko: "저장됨", en: "Saved", zh: "已保存" },
+  "settings.connectorsTitle": { ko: "Codex 커넥터", en: "Codex connectors", zh: "Codex 连接器" },
+  "settings.connectorsEmpty": { ko: "연결된 커넥터가 없습니다. (codex plugin add 로 추가)", en: "No connectors. (add via `codex plugin add`)", zh: "暂无连接器。（用 `codex plugin add` 添加）" },
+  "settings.connectTitle": { ko: "커넥터 연결 (회의 중 사용)", en: "Connect connectors (used in meetings)", zh: "连接连接器（会议中使用）" },
+  "settings.connectDesc": { ko: "플러그인은 인터랙티브 앱 전용이라 회의 중(백그라운드)엔 안 잡혀요. 아래에서 한 번 연결하면(원격 MCP + OAuth) Ghost가 회의 중에도 검색·조회할 수 있어요.", en: "Plugins only work in the interactive app, not in background meetings. Connect once here (remote MCP + OAuth) so Ghost can search them live.", zh: "插件仅在交互式应用中可用，会议（后台）中不行。在此连接一次（远程 MCP + OAuth），Ghost 即可在会议中检索。" },
+  "settings.connect": { ko: "연결", en: "Connect", zh: "连接" },
+  "settings.connected": { ko: "연결됨", en: "Connected", zh: "已连接" },
+  "settings.customName": { ko: "이름", en: "Name", zh: "名称" },
+  "settings.connectHint": { ko: "연결 시 브라우저가 열리면 OAuth 승인을 완료하세요. 목록에 없는 커넥터는 원격 MCP URL을 직접 입력해 추가할 수 있어요.", en: "Complete the OAuth approval when the browser opens. For connectors not listed, paste a remote MCP URL.", zh: "浏览器打开后请完成 OAuth 授权。列表外的连接器可直接粘贴远程 MCP URL。" },
+  "settings.toolsTitle": { ko: "Codex 도구", en: "Codex tools", zh: "Codex 工具" },
+  "settings.meetingsTitle": { ko: "회의 내역", en: "Meeting history", zh: "会议记录" },
+  "settings.meetingsEmpty": { ko: "아직 생성된 회의록이 없습니다.", en: "No minutes yet.", zh: "暂无纪要。" },
+  "settings.meetingNoMinutes": { ko: "회의록이 아직 없어요. 요약만 표시합니다.", en: "No minutes yet — showing summary.", zh: "暂无纪要，仅显示摘要。" },
+  "settings.open": { ko: "열기", en: "Open", zh: "打开" },
+  // 능동성 설정
+  "settings.proactiveTitle": { ko: "능동성", en: "Proactivity", zh: "主动性" },
+  "settings.digestEvery": { ko: "다이제스트 주기", en: "Digest interval", zh: "摘要间隔" },
+  "settings.digestOff": { ko: "끔", en: "Off", zh: "关闭" },
+  "settings.minutes": { ko: "{n}분마다", en: "Every {n} min", zh: "每 {n} 分钟" },
+  "settings.liveSens": { ko: "실시간 개입 민감도", en: "Live interjection", zh: "实时介入" },
+  "settings.sens.off": { ko: "끔", en: "Off", zh: "关" },
+  "settings.sens.conservative": { ko: "신중", en: "Calm", zh: "克制" },
+  "settings.sens.eager": { ko: "적극", en: "Eager", zh: "积极" },
+  "settings.autoResearch": { ko: "다이제스트에서 미해결 1건 자동 조사", en: "Auto-research one open question in digest", zh: "摘要中自动调研一个未决问题" },
+  "settings.autoResearchDesc": { ko: "웹·MCP 능력이 있는 백엔드에서만 동작합니다. 완전 로컬(Ollama)은 요약만 합니다.", en: "Only on backends with web/MCP. Fully-local (Ollama) summarizes only.", zh: "仅在具备 web/MCP 能力的后端生效。完全本地(Ollama)仅做摘要。" },
+  // 저장 위치 + 로컬 모델
+  "settings.storageTitle": { ko: "저장 · 로컬 모델", en: "Storage · Local model", zh: "存储 · 本地模型" },
+  "settings.storagePath": { ko: "회의록 저장 위치", en: "Meeting storage location", zh: "会议记录保存位置" },
+  "settings.storageDesc": { ko: "회의는 이 폴더 아래 일시별 폴더에 저장됩니다. 위치를 바꿔도 기존 회의는 이동되지 않고, 새 회의부터 새 위치에 저장돼요.", en: "Meetings are saved in dated folders under here. Changing the path doesn't move existing meetings; new meetings go to the new location.", zh: "会议按日期保存在此文件夹下。更改路径不会移动现有会议，新会议保存到新位置。" },
+  "settings.storageEnvLocked": { ko: "GHOST_HOME 환경변수로 고정돼 있어요(UI에서 변경 불가).", en: "Locked by the GHOST_HOME environment variable (can't change here).", zh: "由 GHOST_HOME 环境变量锁定（无法在此更改）。" },
+  "settings.localModel": { ko: "로컬 음성 모델 (Qwen3-ASR)", en: "Local speech model (Qwen3-ASR)", zh: "本地语音模型 (Qwen3-ASR)" },
+  "settings.modelReady": { ko: "다운로드 완료 · 사용 준비됨", en: "Downloaded · ready", zh: "已下载 · 就绪" },
+  "settings.modelDownloading": { ko: "다운로드 중…", en: "Downloading…", zh: "下载中…" },
+  "settings.modelDownload": { ko: "로컬 음성 모델 다운로드", en: "Download local speech model", zh: "下载本地语音模型" },
+  "settings.modelDesc": { ko: "오디오를 외부로 보내지 않는 완전 로컬 전사를 쓰려면 한 번만 받으면 됩니다. 클라우드 전사(ElevenLabs)를 쓰면 필요 없어요.", en: "One-time download for fully-local transcription (audio never leaves your device). Not needed if you use cloud STT (ElevenLabs).", zh: "完全本地转写需一次性下载（音频不离开设备）。使用云转写(ElevenLabs)则无需。" },
+  "settings.connFail": { ko: "연결 실패 — 브라우저 OAuth를 완료했는지 확인하세요.", en: "Connection failed — make sure you finished the browser OAuth.", zh: "连接失败 — 请确认已完成浏览器 OAuth。" },
+  "settings.oss": { ko: "오픈소스(MIT)", en: "Open source (MIT)", zh: "开源 (MIT)" },
+  "settings.sttTitle": { ko: "음성 인식 (STT)", en: "Speech-to-Text (STT)", zh: "语音识别 (STT)" },
+  "settings.sttLocal": { ko: "로컬 · Qwen3-ASR", en: "Local · Qwen3-ASR", zh: "本地 · Qwen3-ASR" },
+  "settings.sttCloud": { ko: "클라우드 · Scribe v2", en: "Cloud · Scribe v2", zh: "云端 · Scribe v2" },
+  "settings.sttLocalDesc": { ko: "온디바이스 · 무료 · 오프라인. 정확도는 보통.", en: "On-device · free · offline. Moderate accuracy.", zh: "本地 · 免费 · 离线。准确度中等。" },
+  "settings.sttCloudDesc": { ko: "ElevenLabs Scribe v2 · 고정확도(한국어 지원) · 유료(~$0.39/시간). 키 필요.", en: "ElevenLabs Scribe v2 · high accuracy (Korean) · paid (~$0.39/hr). Key required.", zh: "ElevenLabs Scribe v2 · 高准确度（支持韩语）· 付费（~$0.39/小时）。需密钥。" },
+  "settings.elevenKey": { ko: "ElevenLabs API 키", en: "ElevenLabs API key", zh: "ElevenLabs API 密钥" },
+  "settings.elevenKeyHint": { ko: "키는 로컬 백엔드에만 저장돼요. 영구 저장은 local/.env에 ELEVENLABS_API_KEY=… (gitignore됨).", en: "Stored only on the local backend. For persistence put ELEVENLABS_API_KEY=… in local/.env (gitignored).", zh: "仅保存在本地后端。如需持久化，请在 local/.env 写入 ELEVENLABS_API_KEY=…（已 gitignore）。" },
+  "settings.elevenKeySet": { ko: "키 설정됨", en: "Key set", zh: "已设置密钥" },
+
+  // 온보딩
+  "ob.skip": { ko: "건너뛰기", en: "Skip", zh: "跳过" },
+  "ob.later": { ko: "나중에", en: "Later", zh: "稍后" },
+  "ob.back": { ko: "이전", en: "Back", zh: "上一步" },
+  "ob.next": { ko: "다음", en: "Next", zh: "下一步" },
+  "ob.start": { ko: "첫 회의 시작", en: "Start first meeting", zh: "开始第一次会议" },
+  "ob.welcomeTitle": { ko: "Ghost에 오신 걸 환영해요", en: "Welcome to Ghost", zh: "欢迎使用 Ghost" },
+  "ob.welcomeSub": { ko: "회의를 들으며 필요한 걸 알아서 띄우는 데스크탑 어시스턴트.\n완전 로컬에서 동작하고, 당신의 키로 움직입니다.", en: "A desktop assistant that listens to meetings and surfaces what you need.\nRuns fully local, powered by your own key.", zh: "一款边听会议边呈现所需信息的桌面助手。\n完全本地运行，由你自己的密钥驱动。" },
+  "ob.f1t": { ko: "실시간 전사", en: "Live transcript", zh: "实时转写" },
+  "ob.f1d": { ko: "마이크·시스템 소리를 실시간으로 받아 적어요.", en: "Transcribes mic and system audio in real time.", zh: "实时转写麦克风与系统声音。" },
+  "ob.f2t": { ko: "능동 카드", en: "Proactive cards", zh: "主动卡片" },
+  "ob.f2d": { ko: "질문·정보 공백을 감지해 웹·사내 지식에서 찾아 카드로 띄워요.", en: "Detects questions/gaps and finds answers from web & internal knowledge.", zh: "侦测问题与信息缺口，从网络与内部知识中查找并卡片化。" },
+  "ob.f3t": { ko: "회의록", en: "Minutes", zh: "会议纪要" },
+  "ob.f3d": { ko: "회의가 끝나면 요약·결정·액션아이템을 정리해 줘요.", en: "After the meeting, it sums up decisions and action items.", zh: "会议结束后整理摘要、决定与行动项。" },
+  "ob.brainTitle": { ko: "브레인 연결", en: "Connect a brain", zh: "连接大脑" },
+  "ob.brainSub": { ko: "Ghost는 당신의 AI 계정으로 동작해요. 둘 중 편한 방법을 고르세요.", en: "Ghost runs on your AI account. Pick whichever is easier.", zh: "Ghost 使用你的 AI 账户。选择更方便的一种。" },
+  "ob.openaiTab": { ko: "OpenAI 키 (쉬움)", en: "OpenAI key (easy)", zh: "OpenAI 密钥（简单）" },
+  "ob.codexTab": { ko: "Codex 구독", en: "Codex subscription", zh: "Codex 订阅" },
+  "ob.openaiTitle": { ko: "OpenAI API 키 붙여넣기", en: "Paste OpenAI API key", zh: "粘贴 OpenAI API 密钥" },
+  "ob.openaiHint": { ko: "키는 이 컴퓨터의 로컬 백엔드에만 저장돼요(서버 전송 없음). platform.openai.com/api-keys 에서 발급.", en: "The key is stored only on this computer’s local backend (never sent to a server). Get one at platform.openai.com/api-keys.", zh: "密钥仅保存在本机本地后端（不上传服务器）。可在 platform.openai.com/api-keys 获取。" },
+  "ob.keySet": { ko: "키 설정됨", en: "Key set", zh: "已设置密钥" },
+  "ob.codexTitle": { ko: "Codex CLI 로그인", en: "Codex CLI login", zh: "Codex CLI 登录" },
+  "ob.codexHint": { ko: "ChatGPT 구독으로 동작해요. 터미널에서 아래 명령을 실행한 뒤 ‘다시 확인’을 누르세요.", en: "Runs on your ChatGPT subscription. Run the command below in a terminal, then tap ‘Recheck’.", zh: "使用 ChatGPT 订阅运行。在终端执行下面的命令后点击‘重新检查’。" },
+  "ob.copy": { ko: "복사", en: "Copy", zh: "复制" },
+  "ob.copied": { ko: "복사됨", en: "Copied", zh: "已复制" },
+  "ob.recheck": { ko: "다시 확인", en: "Recheck", zh: "重新检查" },
+  "ob.brainReady": { ko: "브레인 연결됨 — 다음으로 진행할 수 있어요.", en: "Brain connected — you can continue.", zh: "大脑已连接 — 可以继续。" },
+  "ob.brainNot": { ko: "아직 연결되지 않았어요. (지금 건너뛰고 나중에 설정해도 됩니다)", en: "Not connected yet. (You can skip and set it up later.)", zh: "尚未连接。（可跳过，稍后再设置）" },
+  "ob.permTitle": { ko: "소리 권한", en: "Audio permission", zh: "声音权限" },
+  "ob.permSub": { ko: "회의를 들으려면 소리에 접근해야 해요. 오디오는 전사 목적에만 쓰이고 컴퓨터를 벗어나지 않습니다.", en: "Ghost needs audio access to listen. Audio is used only for transcription and never leaves your computer.", zh: "需要访问声音才能聆听会议。音频仅用于转写，绝不离开你的电脑。" },
+  "ob.micName": { ko: "마이크", en: "Microphone", zh: "麦克风" },
+  "ob.micDesc": { ko: "내 목소리·대면 회의를 받아 적어요.", en: "Captures your voice and in-person meetings.", zh: "采集你的声音与现场会议。" },
+  "ob.allow": { ko: "허용", en: "Allow", zh: "允许" },
+  "ob.allowed": { ko: "허용됨", en: "Allowed", zh: "已允许" },
+  "ob.micErrDenied": { ko: "권한이 거부됐어요. 시스템 설정 → 개인정보 보호 → 마이크에서 Ghost를 허용해 주세요.", en: "Permission denied. Allow Ghost in System Settings → Privacy → Microphone.", zh: "权限被拒绝。请在系统设置 → 隐私 → 麦克风中允许 Ghost。" },
+  "ob.micErrNotFound": { ko: "마이크를 찾지 못했어요. 장치를 확인해 주세요.", en: "No microphone found. Check your device.", zh: "未找到麦克风，请检查设备。" },
+  "ob.sysName": { ko: "시스템 소리 (화상회의)", en: "System audio (video calls)", zh: "系统声音（视频会议）" },
+  "ob.sysDesc": { ko: "Zoom·Meet 등 상대 목소리까지 들으려면, 상단 ‘시스템’ 소스를 켤 때 화면 공유 창에서 ‘소리 공유’를 선택하면 돼요. 지금은 설정할 필요 없어요.", en: "To hear others on Zoom/Meet, choose ‘Share audio’ in the screen-share dialog when you switch the source to ‘System’. No need to set it up now.", zh: "想听到 Zoom/Meet 对方声音时，切换到‘系统’源后在共享屏幕对话框选择‘共享声音’即可。现在无需设置。" },
+  "ob.doneTitle": { ko: "준비 완료", en: "All set", zh: "准备就绪" },
+  "ob.doneSub": { ko: "아래 ‘첫 회의 시작’을 누르면 상시 청취가 켜져요.\n말하면 왼쪽에 전사되고, 도움이 필요한 순간 오른쪽에 카드가 떠요.", en: "Tap ‘Start first meeting’ to begin always-on listening.\nSpeech appears on the left; helpful cards pop up on the right.", zh: "点击‘开始第一次会议’即可开启常驻聆听。\n说话内容显示在左侧，需要帮助时右侧会弹出卡片。" },
+  "ob.tip1": { ko: "직접 묻고 싶으면 하단 입력창에 질문하세요.", en: "Want to ask directly? Use the input box below.", zh: "想直接提问？使用下方输入框。" },
+  "ob.tip2": { ko: "회의가 끝나면 “회의록 정리해줘”라고 하면 요약을 만들어요.", en: "After a meeting, say “make the minutes” for a summary.", zh: "会议结束后说“整理纪要”即可生成摘要。" },
+  "ob.tip3": { ko: "설정·관리는 우상단 ‘메뉴’에서. 이 가이드도 거기서 다시 볼 수 있어요.", en: "Settings live under ‘Menu’ (top-right). You can replay this guide there too.", zh: "设置在右上角‘菜单’中，也可在那里重看本引导。" },
+  "ob.stepWelcome": { ko: "환영", en: "Welcome", zh: "欢迎" },
+  "ob.stepBrain": { ko: "브레인 연결", en: "Brain", zh: "大脑" },
+  "ob.stepPerm": { ko: "권한", en: "Permission", zh: "权限" },
+  "ob.stepStart": { ko: "시작", en: "Start", zh: "开始" },
+
+  // 도움말
+  "help.title": { ko: "Ghost 사용법", en: "How to use Ghost", zh: "Ghost 使用说明" },
+  "help.shortcuts": { ko: "단축키", en: "Shortcuts", zh: "快捷键" },
+  "help.r1t": { ko: "마이크 / 시스템 소리", en: "Mic / System audio", zh: "麦克风 / 系统声音" },
+  "help.r1d": { ko: "상단에서 소스를 고르세요. 대면 회의는 ‘마이크’, Zoom·Meet 등 화상회의는 ‘시스템’(화면 공유 창에서 소리 공유 선택).", en: "Pick a source at top. ‘Mic’ for in-person; ‘System’ for Zoom/Meet (choose Share audio in the screen-share dialog).", zh: "在顶部选择来源。现场用‘麦克风’；Zoom/Meet 用‘系统’（在共享屏幕对话框选择共享声音）。" },
+  "help.r2t": { ko: "능동 카드", en: "Proactive cards", zh: "主动卡片" },
+  "help.r2d": { ko: "질문·정보 공백이 감지되면 오른쪽에 카드가 떠요. 확실할 때만 나서고, 애매하면 물러섭니다. 카드는 닫기(X)로 치울 수 있어요.", en: "Cards appear on the right when a question/gap is detected. It steps in only when confident. Close a card with X.", zh: "侦测到问题/缺口时右侧会出现卡片。仅在确信时介入，关闭用 X。" },
+  "help.r3t": { ko: "직접 질문", en: "Ask directly", zh: "直接提问" },
+  "help.r3d": { ko: "하단 입력창에 직접 물어봐도 됩니다. 회의 맥락을 함께 참고해 답해요.", en: "Ask in the box below; it answers using the meeting context.", zh: "可在下方输入框提问，会结合会议上下文回答。" },
+  "help.r4t": { ko: "회의록", en: "Minutes", zh: "会议纪要" },
+  "help.r4d": { ko: "회의가 끝나면 “회의록 정리해줘”라고 하면 요약·결정·액션아이템을 만들어요. 설정 메뉴의 회의 내역에서 다시 볼 수 있어요.", en: "After a meeting, say “make the minutes” to get a summary, decisions, and action items. Find them in Settings → Meeting history.", zh: "会议后说“整理纪要”可生成摘要、决定和行动项。可在设置→会议记录查看。" },
+  "help.r5t": { ko: "음성 응답", en: "Voice replies", zh: "语音回复" },
+  "help.r5d": { ko: "카드의 ‘듣기’를 누르면 음성으로 읽어줘요. 상단 스피커 아이콘으로 자동 음성을 켜고 끌 수 있어요.", en: "Tap ‘Listen’ on a card to hear it. Toggle auto-voice with the speaker icon up top.", zh: "点击卡片上的‘朗读’即可听到。用顶部喇叭图标开关自动语音。" },
+  "help.r6t": { ko: "음성 호출 (wakeword)", en: "Wakeword", zh: "唤醒词" },
+  "help.r6d": { ko: "“재키…”(또는 자비스·고스트)로 부르며 말하면, 자동 음성이 꺼져 있어도 그 답만 음성으로 읽어줘요. 예: “재키, 코스피 알려줘”.", en: "Call “Jackie” (or Jarvis/Ghost) and that one reply is spoken aloud even if auto-voice is off. e.g. “Jackie, what’s the KOSPI?”", zh: "用“Jackie”（或 Jarvis/Ghost）呼叫，即使自动语音关闭也会朗读该回复。例：“Jackie，告诉我恒生指数”。" },
+  "help.k1": { ko: "청취 시작 / 정지", en: "Start / stop listening", zh: "开始 / 停止聆听" },
+  "help.k2": { ko: "청취 시작 / 정지 (입력창 밖에서)", en: "Start / stop (outside input)", zh: "开始 / 停止（输入框外）" },
+  "help.k3": { ko: "질문 입력창 포커스", en: "Focus the ask box", zh: "聚焦提问框" },
+  "help.k4": { ko: "이 도움말 열기 / 닫기", en: "Open / close this help", zh: "打开 / 关闭帮助" },
+  "help.k5": { ko: "어디서나 청취 토글 (전역)", en: "Toggle listening (global)", zh: "全局切换聆听" },
+  "help.k6": { ko: "열린 창 닫기", en: "Close open panels", zh: "关闭已打开面板" },
+};
+
+function translate(lang: Lang, key: string, vars?: Record<string, string | number>): string {
+  const entry = DICT[key];
+  let s = entry ? (entry[lang] ?? entry.ko) : key;
+  if (vars) for (const k in vars) s = s.replace(new RegExp(`\\{${k}\\}`, "g"), String(vars[k]));
+  return s;
+}
+
+export type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+/** Provider 밖(App 본문 등)에서 쓸 t 함수 생성기. */
+export function makeT(lang: Lang): TFn {
+  return (key, vars) => translate(lang, key, vars);
+}
+
+type Ctx = { lang: Lang; setLang: (l: Lang) => void; t: TFn };
+const LangContext = createContext<Ctx>({ lang: "ko", setLang: () => {}, t: (k) => k });
+
+export function LangProvider({ lang, setLang, children }: { lang: Lang; setLang: (l: Lang) => void; children: ReactNode }) {
+  const value = useMemo<Ctx>(() => ({ lang, setLang, t: (key, vars) => translate(lang, key, vars) }), [lang, setLang]);
+  return <LangContext.Provider value={value}>{children}</LangContext.Provider>;
+}
+
+export function useT() {
+  return useContext(LangContext);
+}

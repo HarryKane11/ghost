@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "spoken", "intent", "blocks"],
+  "properties": {
+    "title": { "type": "string" },
+    "spoken": { "type": "string" },
+    "intent": {
+      "type": "string",
+      "enum": ["search", "browse", "answer", "note", "action", "none"]
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "text", "label", "value", "items", "url"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["heading", "text", "stat", "list", "steps", "link", "quote", "handwritten", "image", "chart", "table", "callout", "badges", "progress", "keyvalue", "timeline", "divider"]
+          },
+          "text": { "type": "string" },
+          "label": { "type": "string" },
+          "value": { "type": "string" },
+          "items": { "type": "array", "items": { "type": "string" } },
+          "url": { "type": "string" }
+        }
+      }
+    }
+  }
+}

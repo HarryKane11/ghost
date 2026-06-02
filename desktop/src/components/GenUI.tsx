@@ -1,0 +1,345 @@
+import { useState } from "react";
+import {
+  Link2, Quote, ArrowUpRight, Info, TriangleAlert, CircleCheck, CircleX,
+} from "lucide-react";
+
+/** 깨진/없는 이미지 URL이면 조용히 숨긴다 (회의록 외 image 블록 깨짐 방지) */
+function ImageBlock({ url, label }: { url?: string; label?: string }) {
+  const [bad, setBad] = useState(false);
+  if (!url || bad || !/^(data:image|https?:)/.test(url)) return null;
+  return (
+    <figure className="overflow-hidden rounded-xl border border-hairline bg-surface-soft">
+      <img src={url} alt={label || "Ghost가 생성한 이미지"} className="block w-full" loading="lazy" onError={() => setBad(true)} />
+      {label && <figcaption className="px-3 py-1.5 text-[11px] text-stone">{label}</figcaption>}
+    </figure>
+  );
+}
+
+export type Block = {
+  type: string;
+  text?: string;
+  label?: string;
+  value?: string;
+  items?: string[];
+  url?: string;
+};
+
+export type Spec = {
+  title: string;
+  spoken: string;
+  intent: string;
+  blocks: Block[];
+};
+
+const PALETTE = ["#00b48a", "#0a0a0a", "#5a5a5c", "#e9a23b", "#6b8af0", "#7cebcb", "#d05757"];
+
+function hostname(u: string) {
+  try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; }
+}
+function isKorean(s: string) { return /[가-힣]/.test(s); }
+function deltaTone(v: string) {
+  if (/^-|▼|하락|감소/.test(v)) return "text-[#d05757]";
+  if (/^\+|▲|상승|증가/.test(v)) return "text-spark-deep";
+  return "text-foreground";
+}
+
+/** "라벨: 숫자 단위" → {label, value, suffix} */
+function parsePoints(items: string[]) {
+  return items
+    .map((s) => {
+      const m = s.match(/^(.*?)[:\-–—]\s*([-+]?[\d.,]+)\s*(.*)$/);
+      if (!m) return null;
+      const value = parseFloat(m[2].replace(/,/g, ""));
+      if (Number.isNaN(value)) return null;
+      return { label: m[1].trim(), value, suffix: m[3].trim() };
+    })
+    .filter(Boolean) as { label: string; value: number; suffix: string }[];
+}
+
+// ── 차트들 ──────────────────────────────────────────────────────────────────
+function BarChart({ title, data }: { title?: string; data: ReturnType<typeof parsePoints> }) {
+  const max = Math.max(...data.map((d) => Math.abs(d.value))) || 1;
+  return (
+    <ChartFrame title={title}>
+      <div className="space-y-2">
+        {data.map((d, i) => (
+          <div key={i} className="flex items-center gap-2.5">
+            <span className="w-24 shrink-0 truncate text-right text-[11px] text-stone" title={d.label}>{d.label}</span>
+            <div className="relative h-5 flex-1 overflow-hidden rounded-md bg-[color-mix(in_srgb,var(--hairline)_70%,transparent)]">
+              <div className="absolute inset-y-0 left-0 rounded-md bg-gradient-to-r from-spark to-spark-deep"
+                style={{ width: `${Math.max(3, (Math.abs(d.value) / max) * 100)}%` }} />
+            </div>
+            <span className="w-16 shrink-0 text-right text-[11.5px] font-medium tabular-nums text-charcoal">
+              {d.value.toLocaleString()}{d.suffix}
+            </span>
+          </div>
+        ))}
+      </div>
+    </ChartFrame>
+  );
+}
+
+function LineChart({ title, data, area }: { title?: string; data: ReturnType<typeof parsePoints>; area?: boolean }) {
+  const w = 320, h = 96, pad = 10;
+  const max = Math.max(...data.map((d) => d.value));
+  const min = Math.min(...data.map((d) => d.value), 0);
+  const span = max - min || 1;
+  const x = (i: number) => pad + (i * (w - 2 * pad)) / (data.length - 1 || 1);
+  const y = (v: number) => h - pad - ((v - min) / span) * (h - 2 * pad);
+  const pts = data.map((d, i) => `${x(i)},${y(d.value)}`).join(" ");
+  const areaPath = `M ${x(0)},${h - pad} L ${pts.split(" ").join(" L ")} L ${x(data.length - 1)},${h - pad} Z`;
+  return (
+    <ChartFrame title={title}>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: 110 }}>
+        {area && <path d={areaPath} fill="color-mix(in srgb, var(--spark) 16%, transparent)" />}
+        <polyline points={pts} fill="none" stroke="var(--spark-deep)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        {data.map((d, i) => <circle key={i} cx={x(i)} cy={y(d.value)} r={2.5} fill="var(--spark-deep)" />)}
+      </svg>
+      <div className="mt-1 flex justify-between text-[10px] text-stone">
+        {data.map((d, i) => <span key={i} className="truncate" style={{ maxWidth: `${100 / data.length}%` }}>{d.label}</span>)}
+      </div>
+    </ChartFrame>
+  );
+}
+
+function PieChart({ title, data }: { title?: string; data: ReturnType<typeof parsePoints> }) {
+  const total = data.reduce((s, d) => s + Math.abs(d.value), 0) || 1;
+  const R = 42, C = 50, sw = 16;
+  let acc = 0;
+  const circ = 2 * Math.PI * R;
+  return (
+    <ChartFrame title={title}>
+      <div className="flex items-center gap-4">
+        <svg viewBox="0 0 100 100" style={{ width: 96, height: 96 }} className="-rotate-90">
+          {data.map((d, i) => {
+            const frac = Math.abs(d.value) / total;
+            const dash = frac * circ;
+            const el = (
+              <circle key={i} cx={C} cy={C} r={R} fill="none" stroke={PALETTE[i % PALETTE.length]}
+                strokeWidth={sw} strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-acc * circ} />
+            );
+            acc += frac;
+            return el;
+          })}
+        </svg>
+        <div className="space-y-1">
+          {data.map((d, i) => (
+            <div key={i} className="flex items-center gap-2 text-[12px]">
+              <span className="size-2.5 rounded-sm" style={{ background: PALETTE[i % PALETTE.length] }} />
+              <span className="text-slate">{d.label}</span>
+              <span className="font-medium tabular-nums text-charcoal">{Math.round((Math.abs(d.value) / total) * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </ChartFrame>
+  );
+}
+
+function ChartFrame({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-hairline bg-surface-soft px-4 py-3">
+      {title && <div className="mb-2.5 text-[12px] font-medium text-steel">{title}</div>}
+      {children}
+    </div>
+  );
+}
+
+const CALLOUT = {
+  info: { icon: Info, cls: "border-[#bcd3f5] bg-[#eef4fd] text-[#2f5fb0]" },
+  warn: { icon: TriangleAlert, cls: "border-[#e9c46a] bg-[#fdf6e3] text-[#9a6a00]" },
+  success: { icon: CircleCheck, cls: "border-spark-soft bg-[color-mix(in_srgb,var(--spark)_10%,transparent)] text-spark-deep" },
+  error: { icon: CircleX, cls: "border-[#e9b0b0] bg-[#fdeeee] text-[#b04141]" },
+} as const;
+
+// ── 블록 렌더러 레지스트리 ───────────────────────────────────────────────────
+function BlockView({ b }: { b: Block }) {
+  switch (b.type) {
+    case "heading":
+      return <h4 className="mt-3 text-[13.5px] font-semibold tracking-tight text-foreground first:mt-0">{b.text}</h4>;
+    case "text":
+      return <p className="text-[13.5px] leading-relaxed text-charcoal">{b.text}</p>;
+    case "divider":
+      return <hr className="my-1 border-hairline" />;
+    case "stat":
+      return (
+        <div className="rounded-xl border border-hairline bg-surface-soft px-3.5 py-2.5">
+          <div className="text-[11px] text-stone">{b.label}</div>
+          <div className={`mt-0.5 text-[18px] font-semibold tracking-tight ${deltaTone(b.value || "")}`}>{b.value}</div>
+        </div>
+      );
+    case "chart": {
+      const data = parsePoints(b.items || []);
+      if (!data.length) return null;
+      const t = (b.value || "bar").toLowerCase();
+      if (t === "line") return <LineChart title={b.label} data={data} />;
+      if (t === "area") return <LineChart title={b.label} data={data} area />;
+      if (t === "pie" || t === "donut") return <PieChart title={b.label} data={data} />;
+      return <BarChart title={b.label} data={data} />;
+    }
+    case "table": {
+      const rows = (b.items || []).map((r) => r.split("|").map((c) => c.trim()));
+      if (!rows.length) return null;
+      const [head, ...body] = rows;
+      return (
+        <div className="overflow-hidden rounded-xl border border-hairline">
+          {b.label && <div className="border-b border-hairline bg-surface-soft px-3 py-1.5 text-[11px] font-medium text-steel">{b.label}</div>}
+          <table className="w-full text-[12.5px]">
+            <thead>
+              <tr className="bg-surface-soft text-stone">
+                {head.map((c, i) => <th key={i} className="px-3 py-1.5 text-left font-medium">{c}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {body.map((r, i) => (
+                <tr key={i} className="border-t border-hairline">
+                  {r.map((c, j) => <td key={j} className="px-3 py-1.5 text-charcoal">{c}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+    case "list":
+      return (
+        <ul className="space-y-1.5">
+          {(b.items || []).map((it, i) => (
+            <li key={i} className="flex gap-2 text-[13px] leading-relaxed text-charcoal">
+              <span className="mt-[7px] size-1 shrink-0 rounded-full bg-spark" /><span>{it}</span>
+            </li>
+          ))}
+        </ul>
+      );
+    case "steps":
+      return (
+        <ol className="space-y-1.5">
+          {(b.items || []).map((it, i) => (
+            <li key={i} className="flex gap-2.5 text-[13px] leading-relaxed text-charcoal">
+              <span className="font-mono text-[11px] text-stone">{String(i + 1).padStart(2, "0")}</span><span>{it}</span>
+            </li>
+          ))}
+        </ol>
+      );
+    case "keyvalue":
+      return (
+        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-xl border border-hairline bg-surface-soft px-3.5 py-2.5">
+          {(b.items || []).map((it, i) => {
+            const [k, ...rest] = it.split(/[:：]/);
+            return (
+              <div key={i} className="contents">
+                <span className="text-[12px] text-stone">{k?.trim()}</span>
+                <span className="text-[12.5px] text-charcoal">{rest.join(":").trim()}</span>
+              </div>
+            );
+          })}
+        </div>
+      );
+    case "timeline":
+      return (
+        <div className="relative space-y-3 pl-4">
+          <span className="absolute left-[5px] top-1 bottom-1 w-px bg-hairline" />
+          {(b.items || []).map((it, i) => {
+            const [when, ...what] = it.split("|");
+            return (
+              <div key={i} className="relative">
+                <span className="absolute -left-4 top-1 size-2.5 rounded-full border-2 border-spark bg-canvas" />
+                <div className="text-[11px] font-medium text-spark-deep">{when?.trim()}</div>
+                <div className="text-[13px] text-charcoal">{what.join("|").trim()}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    case "callout": {
+      const v = (b.value as keyof typeof CALLOUT) in CALLOUT ? (b.value as keyof typeof CALLOUT) : "info";
+      const { icon: Icon, cls } = CALLOUT[v];
+      return (
+        <div className={`flex gap-2.5 rounded-xl border px-3.5 py-2.5 ${cls}`}>
+          <Icon className="mt-0.5 size-4 shrink-0" />
+          <div>
+            {b.label && <div className="text-[12.5px] font-semibold">{b.label}</div>}
+            <div className="text-[12.5px] leading-relaxed opacity-90">{b.text}</div>
+          </div>
+        </div>
+      );
+    }
+    case "badges":
+      return (
+        <div className="flex flex-wrap gap-1.5">
+          {(b.items || []).map((it, i) => (
+            <span key={i} className="rounded-full border border-hairline bg-surface px-2.5 py-1 text-[11.5px] text-slate">{it}</span>
+          ))}
+        </div>
+      );
+    case "progress": {
+      const v = Math.max(0, Math.min(100, parseFloat((b.value || "0").replace(/[^\d.]/g, "")) || 0));
+      return (
+        <div>
+          <div className="mb-1 flex justify-between text-[11.5px]"><span className="text-steel">{b.label}</span><span className="font-medium tabular-nums text-charcoal">{v}%</span></div>
+          <div className="h-2 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--hairline)_70%,transparent)]">
+            <div className="h-full rounded-full bg-gradient-to-r from-spark to-spark-deep" style={{ width: `${v}%` }} />
+          </div>
+        </div>
+      );
+    }
+    case "link":
+      return (
+        <a href={b.url} target="_blank" rel="noreferrer"
+          className="group inline-flex max-w-full items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-1.5 text-[12px] text-steel transition-colors hover:border-ink/30 hover:text-foreground">
+          <Link2 className="size-3 shrink-0" />
+          <span className="truncate">{b.label || hostname(b.url || "")}</span>
+          <ArrowUpRight className="size-3 shrink-0 opacity-50 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+        </a>
+      );
+    case "quote":
+      return (
+        <blockquote className="flex gap-2 border-l-2 border-spark-soft pl-3 text-[13px] italic leading-relaxed text-slate">
+          <Quote className="size-3.5 shrink-0 text-spark-soft" />
+          <span>{b.text}{b.label && <span className="mt-1 block text-[11px] not-italic text-stone">— {b.label}</span>}</span>
+        </blockquote>
+      );
+    case "image":
+      return <ImageBlock url={b.url} label={b.label} />;
+    case "handwritten": {
+      const ko = isKorean(b.text || "");
+      return (
+        <div className="paper overflow-hidden rounded-xl border border-hairline px-5 py-4 shadow-inner">
+          <div className={`${ko ? "hand-ko text-[22px]" : "hand-en text-[20px]"} whitespace-pre-wrap text-charcoal`}>{b.text}</div>
+        </div>
+      );
+    }
+    default:
+      return b.text ? <p className="text-[13px] text-charcoal">{b.text}</p> : null;
+  }
+}
+
+/** 연속된 stat 블록은 한 줄(그리드)로 묶어 렌더 */
+function groupBlocks(blocks: Block[]) {
+  const groups: { kind: "stats" | "single"; blocks: Block[] }[] = [];
+  for (const b of blocks) {
+    if (b.type === "stat") {
+      const last = groups[groups.length - 1];
+      if (last && last.kind === "stats") last.blocks.push(b);
+      else groups.push({ kind: "stats", blocks: [b] });
+    } else groups.push({ kind: "single", blocks: [b] });
+  }
+  return groups;
+}
+
+export function GenUI({ spec }: { spec: Spec }) {
+  const groups = groupBlocks(spec.blocks || []);
+  return (
+    <div className="space-y-3">
+      {groups.map((g, gi) =>
+        g.kind === "stats" ? (
+          <div key={gi} className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(g.blocks.length, 3)}, minmax(0,1fr))` }}>
+            {g.blocks.map((b, i) => <BlockView key={i} b={b} />)}
+          </div>
+        ) : (
+          g.blocks.map((b, i) => <BlockView key={`${gi}-${i}`} b={b} />)
+        )
+      )}
+    </div>
+  );
+}

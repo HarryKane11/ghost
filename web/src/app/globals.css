@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+/*
+  Ghost design tokens — Mintlify-inspired (getdesign add mintlify)
+  Adapted to a monochrome, premium B&W language to match the Ghost logo.
+  Light is the default theme. brand-spark is used sparingly as an accent.
+*/
+
+:root {
+  /* ink scale */
+  --ink: #0a0a0a;
+  --charcoal: #1c1c1e;
+  --slate: #3a3a3c;
+  --steel: #5a5a5c;
+  --stone: #888888;
+  --muted: #a8a8aa;
+
+  /* surfaces */
+  --canvas: #ffffff;
+  --surface: #f7f7f7;
+  --surface-soft: #fafafa;
+  --hairline: #e5e5e5;
+  --hairline-soft: #ededed;
+
+  /* accent (sparingly — the logo's "spark") */
+  --spark: #00d4a4;
+  --spark-deep: #00b48a;
+  --spark-soft: #7cebcb;
+
+  /* semantic (shadcn-compatible names) */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: var(--canvas);
+  --card-foreground: var(--ink);
+  --popover: var(--canvas);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface);
+  --secondary-foreground: var(--ink);
+  --muted-bg: var(--surface);
+  --muted-foreground: var(--steel);
+  --accent: var(--surface);
+  --accent-foreground: var(--ink);
+  --border: var(--hairline);
+  --input: var(--hairline);
+  --ring: var(--ink);
+
+  --radius: 12px;
+}
+
+.dark {
+  --ink: #ffffff;
+  --charcoal: #ededed;
+  --slate: #cfcfd1;
+  --steel: #b3b3b3;
+  --stone: #8a8a8c;
+  --muted: #6a6a6c;
+
+  --canvas: #0a0a0a;
+  --surface: #141416;
+  --surface-soft: #0f0f10;
+  --hairline: #1f1f1f;
+  --hairline-soft: #242424;
+
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: #111113;
+  --card-foreground: var(--ink);
+  --popover: #111113;
+  --popover-foreground: var(--ink);
+  --primary: #ffffff;
+  --primary-foreground: #0a0a0a;
+  --secondary: var(--surface);
+  --secondary-foreground: var(--ink);
+  --muted-foreground: var(--steel);
+  --accent: var(--surface);
+  --accent-foreground: var(--ink);
+  --border: var(--hairline);
+  --input: var(--hairline);
+  --ring: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted-bg);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-ink: var(--ink);
+  --color-charcoal: var(--charcoal);
+  --color-slate: var(--slate);
+  --color-steel: var(--steel);
+  --color-stone: var(--stone);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-hairline: var(--hairline);
+  --color-spark: var(--spark);
+  --color-spark-deep: var(--spark-deep);
+  --color-spark-soft: var(--spark-soft);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+
+  --tracking-tighter: -0.03em;
+  --tracking-tight: -0.02em;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+/* subtle grid backdrop for the premium feel */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--hairline) 60%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--hairline) 60%, transparent) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+@keyframes spark-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+.animate-spark { animation: spark-pulse 2.8s ease-in-out infinite; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-rise { animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
