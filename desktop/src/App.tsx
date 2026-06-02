@@ -3,6 +3,7 @@ import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, SlidersHorizontal, AudioLines, Square,
   HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Ghost, Copy,
+  Languages, Columns2, PanelRight,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -201,6 +202,12 @@ export default function App() {
   const [transTab, setTransTab] = useState<"raw" | "script">("raw");  // 대화기록 / 스크립트
   const [scriptParas, setScriptParas] = useState<api.ScriptParagraph[]>([]);
   const [scriptLoading, setScriptLoading] = useState(false);
+  // 디스플레이 모드 + 패널 분할 + 인터뷰 번역
+  const [displayMode, setDisplayMode] = usePref<"full" | "assist" | "interview">("ghost.displayMode", "full");
+  const [splitPct, setSplitPct] = usePref<number>("ghost.splitPct", 42);
+  const [transLang, setTransLang] = usePref<string>("ghost.transLang", "en");
+  const [transLangs, setTransLangs] = useState<api.TransLang[]>([]);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
   const [transcript, setTranscript] = useState<{ id: string; text: string }[]>([]);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [input, setInput] = useState("");
@@ -246,6 +253,34 @@ export default function App() {
   // @ 참조용 최근 회의 목록 (메뉴 열 때·회의 종료 시 갱신)
   const loadRecentMeetings = useCallback(() => { api.getMeetings().then(setRecentMeetings).catch(() => {}); }, []);
   useEffect(() => { loadRecentMeetings(); }, [loadRecentMeetings]);
+  // 디스플레이 모드 → Electron 창 크기/always-on-top 동기화 + 번역 언어 목록
+  useEffect(() => { (window as { ghost?: { setWindowMode?: (m: string) => void } }).ghost?.setWindowMode?.(displayMode); }, [displayMode]);
+  useEffect(() => { api.getTranslateLangs().then(setTransLangs); }, []);
+  // 인터뷰 모드: 번역 안 된 전사 줄을 하나씩 순차 번역(언어별 캐시)
+  useEffect(() => {
+    if (displayMode !== "interview") return;
+    const pending = transcript.find((tr) => translations[`${transLang}:${tr.id}`] === undefined);
+    if (!pending) return;
+    let alive = true;
+    api.translateText(pending.text, transLang).then((tr) => {
+      if (alive) setTranslations((m) => ({ ...m, [`${transLang}:${pending.id}`]: tr || "" }));
+    });
+    return () => { alive = false; };
+  }, [displayMode, transLang, transcript, translations]);
+
+  // 패널 분할 드래그(리사이즈 핸들러)
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  const startSplitDrag = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const onMove = (ev: PointerEvent) => {
+      const el = splitRef.current; if (!el) return;
+      const r = el.getBoundingClientRect();
+      setSplitPct(Math.min(72, Math.max(28, ((ev.clientX - r.left) / r.width) * 100)));
+    };
+    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [setSplitPct]);
   // 첫 실행이면 온보딩을 띄운다.
   useEffect(() => { if (!localStorage.getItem(ONBOARDED_KEY)) setOnboard(true); }, []);
   // STT 모델 준비될 때까지 폴링 (pre-warm 완료 감지)
@@ -682,6 +717,15 @@ export default function App() {
           {backendErr ? <><ShieldAlert className="size-3.5" /> {t("header.backendErr")}</> : codexBad ? <><ShieldAlert className="size-3.5" /> {t("header.loginNeeded")}</> : status?.codex_logged_in ? <><ShieldCheck className="size-3.5 text-spark-deep" /> {t("header.connected")}</> : <><RefreshCw className="size-3.5" /> {t("header.refresh")}</>}
         </button>
         <div style={NO_DRAG} className="ml-auto flex items-center gap-1">
+          {/* 디스플레이 모드 전환 */}
+          <div className="mr-1 flex items-center rounded-full border border-hairline bg-surface-soft p-0.5">
+            {([["full", Columns2, t("mode.full")], ["assist", PanelRight, t("mode.assist")], ["interview", Languages, t("mode.interview")]] as const).map(([m, Icon, label]) => (
+              <button key={m} onClick={() => setDisplayMode(m)} title={label}
+                className={cn("grid size-7 place-items-center rounded-full transition-colors", displayMode === m ? "bg-ink text-canvas" : "text-steel hover:text-foreground")}>
+                <Icon className="size-3.5" />
+              </button>
+            ))}
+          </div>
           <button onClick={() => setHelpOpen(true)} title={t("header.help")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><HelpCircle className="size-4" /></button>
           <button onClick={() => setMenuOpen(true)} title="설정·관리" className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><SlidersHorizontal className="size-3.5" /> {t("header.menu")}</button>
           <button onClick={() => setVoiceOn((v) => !v)} title={voiceOn ? t("header.voiceOff") : t("header.voiceOn")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground">{voiceOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}</button>
@@ -689,10 +733,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* 본문 */}
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
-        {/* 좌: 실시간 전사 */}
-        <section className="flex min-h-0 flex-col border-r border-hairline">
+      {/* 본문 — 모드별 레이아웃 (full/interview: 전사+우측, assist: 카드만) */}
+      <div ref={splitRef} className="flex min-h-0 flex-1">
+        {/* 좌: 실시간 전사 (assist 모드에선 숨김) */}
+        <section className={cn("flex min-h-0 flex-col border-r border-hairline", displayMode === "assist" && "hidden")}
+          style={displayMode === "assist" ? undefined : { width: `${splitPct}%` }}>
           <div className="flex items-center gap-2 px-4 py-2.5">
             <AudioLines className="size-3.5 text-stone" />
             <div className="flex items-center gap-1">
@@ -702,6 +747,12 @@ export default function App() {
                   {tab === "raw" ? t("trans.tabRaw") : t("trans.tabScript")}
                 </button>
               ))}
+              {displayMode === "interview" && transTab === "raw" && (
+                <select value={transLang} onChange={(e) => setTransLang(e.target.value)} title={t("trans.translateTo")}
+                  className="ml-1 h-6 rounded-md border border-hairline bg-surface-soft px-1.5 text-[11px] text-steel outline-none focus:border-ink/40">
+                  {(transLangs.length ? transLangs : [{ code: "en", label: "English" } as api.TransLang]).map((l) => <option key={l.code} value={l.code}>↳ {l.label}</option>)}
+                </select>
+              )}
             </div>
             <div className="ml-auto flex items-center gap-1">
               <button onClick={openContext} title={t("trans.context")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><FileText className="size-3.5" /></button>
@@ -792,7 +843,17 @@ export default function App() {
               const shown = q ? transcript.filter((t) => t.text.toLowerCase().includes(q)) : transcript;
               if (q && shown.length === 0) return <p className="px-1 py-2 text-center text-[12px] text-stone">{t("trans.noResults", { q: tq })}</p>;
               // 새 줄은 유령 커서가 좌→우로 쓸고 지나간 듯(ghost-line) 드러난다.
-              return shown.map((t) => <p key={t.id} className="ghost-line text-[13px] leading-relaxed text-slate">{t.text}</p>);
+              // 인터뷰 모드면 각 줄 아래 번역을 함께 보여준다(이중 언어).
+              return shown.map((ln) => (
+                <div key={ln.id} className="ghost-line">
+                  <p className="text-[13px] leading-relaxed text-slate">{ln.text}</p>
+                  {displayMode === "interview" && (
+                    <p className="mt-0.5 text-[12.5px] leading-relaxed text-spark-deep">
+                      {translations[`${transLang}:${ln.id}`] ?? <span className="italic text-stone">…</span>}
+                    </p>
+                  )}
+                </div>
+              ));
             })()}
             {/* 듣는 중: 유령이 좌우로 날며 다음 문장을 기다리는 shimmer */}
             {active && !tq.trim() && !demoOn && (
@@ -808,8 +869,16 @@ export default function App() {
           </div>
         </section>
 
+        {/* 리사이즈 핸들러 (assist 모드 제외) */}
+        {displayMode !== "assist" && (
+          <div onPointerDown={startSplitDrag} title={t("split.resize")}
+            className="group relative w-1 shrink-0 cursor-col-resize bg-hairline/40 transition-colors hover:bg-spark/40">
+            <div className="absolute inset-y-0 -left-1 -right-1" />
+          </div>
+        )}
+
         {/* 우: 대화 피드 (사용자 입력 + Ghost 카드) */}
-        <section className="relative flex min-h-0 flex-col">
+        <section className="relative flex min-h-0 flex-1 flex-col">
           {feed.length === 0 && !demoOn && <PhantomField />}
           {demoOn && (
             <div className="flex items-center gap-2 border-b border-hairline bg-spark-soft/20 px-5 py-2 text-[12px] text-spark-deep">

@@ -519,6 +519,37 @@ def stt_model_download() -> dict:
     return stt.start_download()
 
 
+# 인터뷰 모드 번역 대상 언어.
+TRANSLATE_LANGS = [
+    {"code": "en", "name": "English", "label": "English"},
+    {"code": "ko", "name": "Korean", "label": "한국어"},
+    {"code": "zh", "name": "Simplified Chinese", "label": "中文"},
+    {"code": "ja", "name": "Japanese", "label": "日本語"},
+    {"code": "es", "name": "Spanish", "label": "Español"},
+    {"code": "fr", "name": "French", "label": "Français"},
+    {"code": "de", "name": "German", "label": "Deutsch"},
+    {"code": "vi", "name": "Vietnamese", "label": "Tiếng Việt"},
+]
+_LANG_NAME = {x["code"]: x["name"] for x in TRANSLATE_LANGS}
+
+
+class TranslateReq(BaseModel):
+    text: str
+    target: str = "en"
+
+
+@app.post("/api/translate")
+def translate_ep(req: TranslateReq) -> dict:
+    """한 문장 번역(인터뷰 모드). target=언어 코드."""
+    name = _LANG_NAME.get(req.target, req.target)
+    return {"text": brain.translate(req.text, name, _cfg())}
+
+
+@app.get("/api/translate/langs")
+def translate_langs() -> dict:
+    return {"langs": TRANSLATE_LANGS}
+
+
 @app.get("/api/glossary")
 def get_glossary_ep() -> dict:
     """사용자 전역 용어집(Word Memory)."""

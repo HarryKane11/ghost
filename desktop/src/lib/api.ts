@@ -251,6 +251,15 @@ export async function downloadSttModel(): Promise<SttModel | null> {
   try { return await (await fetch(`${BASE}/api/stt/model/download`, { method: "POST" })).json(); } catch { return null; }
 }
 
+// 인터뷰 모드 번역
+export type TransLang = { code: string; name: string; label: string };
+export async function getTranslateLangs(): Promise<TransLang[]> {
+  try { return (await (await fetch(`${BASE}/api/translate/langs`)).json()).langs || []; } catch { return []; }
+}
+export async function translateText(text: string, target: string): Promise<string> {
+  try { return (await (await fetch(`${BASE}/api/translate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, target }) })).json()).text || ""; } catch { return ""; }
+}
+
 // 전역 용어집 (Word Memory)
 export type GlossaryItem = { term: string; note?: string };
 export async function getGlossary(): Promise<GlossaryItem[]> {

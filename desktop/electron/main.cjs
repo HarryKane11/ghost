@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, shell, desktopCapturer, Tray, Menu, globalShortcut, nativeImage } = require("electron");
+const { app, BrowserWindow, session, shell, desktopCapturer, Tray, Menu, globalShortcut, nativeImage, ipcMain } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -123,6 +123,23 @@ function createWindow() {
   if (devUrl) win.loadURL(devUrl);
   else win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
 }
+
+// 디스플레이 모드별 창 크기/always-on-top. assist=컴팩트 플로팅, full/interview=넓게.
+ipcMain.on("ghost:window-mode", (_e, mode) => {
+  if (!win) return;
+  try {
+    if (mode === "assist") {
+      win.setMinimumSize(360, 460);
+      win.setSize(440, 640, true);
+      win.setAlwaysOnTop(true, "floating");
+    } else {
+      win.setAlwaysOnTop(false);
+      win.setMinimumSize(880, 560);
+      const [w, h] = win.getSize();
+      if (w < 880 || h < 560) win.setSize(Math.max(w, 1100), Math.max(h, 720), true);
+    }
+  } catch { /* ignore */ }
+});
 
 function showWindow() {
   if (!win) { createWindow(); return; }

@@ -14,4 +14,6 @@ contextBridge.exposeInMainWorld("ghost", {
     ipcRenderer.on("ghost:toggle-listen", h);
     return () => ipcRenderer.removeListener("ghost:toggle-listen", h);
   },
+  // 디스플레이 모드별 창 크기/always-on-top 조절 (full | assist | interview).
+  setWindowMode: (mode) => ipcRenderer.send("ghost:window-mode", mode),
 });

@@ -20,6 +20,12 @@ const DICT: Record<string, Record<Lang, string>> = {
   "header.loginNeeded": { ko: "로그인 필요", en: "Login needed", zh: "需要登录" },
   "header.backendErr": { ko: "백엔드 끊김", en: "Backend down", zh: "后端断开" },
   "header.refresh": { ko: "새로고침", en: "Refresh", zh: "刷新" },
+  // 디스플레이 모드
+  "mode.full": { ko: "전체 (전사+카드)", en: "Full (transcript + cards)", zh: "完整（转写+卡片）" },
+  "mode.assist": { ko: "어시스트 (카드만·플로팅)", en: "Assist (cards only, floating)", zh: "助手（仅卡片·悬浮）" },
+  "mode.interview": { ko: "인터뷰 (원문+번역)", en: "Interview (original + translation)", zh: "访谈（原文+翻译）" },
+  "split.resize": { ko: "패널 크기 조절", en: "Resize panels", zh: "调整面板大小" },
+  "trans.translateTo": { ko: "번역 언어", en: "Translate to", zh: "翻译为" },
 
   // 전사 패널
   "trans.title": { ko: "실시간 전사", en: "Live transcript", zh: "实时转写" },

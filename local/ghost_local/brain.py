@@ -373,6 +373,17 @@ def judge(utterance: str, context: str = "", cfg: Optional["BrainConfig"] = None
     }
 
 
+def translate(text: str, target_name: str, cfg: Optional["BrainConfig"] = None) -> str:
+    """한 문장을 target 언어로 번역(인터뷰 모드용). 설정된 백엔드의 경량 텍스트 경로 사용."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    cfg = cfg or BrainConfig()
+    sys = (f"Translate the user's text into {target_name}. "
+           "Output ONLY the translation — no quotes, no notes, no original text.")
+    return _brain_text(sys, text, cfg, timeout=30).strip()
+
+
 def chat_reply(utterance: str, context: str = "", cfg: Optional["BrainConfig"] = None) -> dict:
     """직접 말 걸기에 대한 빠른 대화 응답. 설정된 백엔드 사용. GenUI 스펙으로 반환."""
     cfg = cfg or BrainConfig()
