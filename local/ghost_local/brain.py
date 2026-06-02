@@ -21,7 +21,7 @@ import os
 import re
 import subprocess
 import tempfile
-import threading
+import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,10 +29,12 @@ from typing import Any, Optional
 
 OLLAMA_URL = "http://localhost:11434"
 
-# codex CLI 직렬화 락 — 동시 codex exec는 ~/.codex/auth.json 토큰 갱신을 두고 경쟁해
-# "refresh token already consumed by another client"로 실패한다(회의록 텍스트+이미지,
-# digest, judge가 겹칠 때). 모든 codex 호출을 한 번에 하나만 돌도록 직렬화한다.
-_CODEX_LOCK = threading.Lock()
+
+def _is_token_race(stderr: str) -> bool:
+    """동시 codex 호출이 ~/.codex/auth.json 토큰 갱신을 두고 경쟁할 때 나는 에러.
+    드물게(토큰 만료 시점) 발생 → 짧게 뒤 재시도하면 갱신된 토큰으로 성공한다."""
+    s = (stderr or "").lower()
+    return ("refresh token" in s and "consumed" in s) or "already consumed" in s
 JUDGE_MODEL = "gemma4:e4b"
 
 ALLOWED_BLOCKS = (
@@ -241,10 +243,19 @@ def _codex_text(system: str, user: str, model: Optional[str] = None, timeout: in
     # 분류는 가벼운 모델로 (없으면 codex 기본값). 답변 모델과 분리.
     cmd += ["-m", model or "gpt-5.4-mini"]
     cmd.append(f"{system}\n\n{user}")
+
+    def _once() -> tuple[str, str]:
+        p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+        out = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
+        return out, (p.stderr or "")
+
     try:
-        with _CODEX_LOCK:  # codex 호출 직렬화(토큰 레이스 방지)
-            subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
-        raw = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
+        raw, err = _once()
+        # 토큰 레이스("refresh token already consumed")는 동시 codex 호출 시 드물게 발생 →
+        # 잠깐 뒤 재시도하면 갱신된 토큰으로 성공. (직렬화 락 대신 retry로 처리해 병목 제거.)
+        if not raw.strip() and _is_token_race(err):
+            time.sleep(1.2)
+            raw, _ = _once()
     except Exception:
         raw = ""
     finally:
@@ -571,7 +582,6 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
         cmd += ["-m", cfg.codex_model]
     cmd.append(f"{system}{_lang_line(cfg)}\n\n[맥락]\n{context}\n\n[요청]\n{query}")
 
-    _CODEX_LOCK.acquire()  # codex 직렬화(토큰 레이스 방지). finally에서 해제.
     proc = subprocess.Popen(
         cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, text=True, bufsize=1,
@@ -657,7 +667,6 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
     finally:
         if proc.poll() is None:
             proc.kill()
-        _CODEX_LOCK.release()
 
     spec = _extract_json(final_text)
     if spec is None and error_msg:
@@ -700,11 +709,10 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: 
         if os.path.exists(img_path):
             os.unlink(img_path)
         img_prompt = MINUTES_IMG_PROMPT.format(path=img_path, transcript=transcript)
-        with _CODEX_LOCK:  # codex 직렬화(토큰 레이스 방지)
-            subprocess.run(
-                ["codex", "exec", "--skip-git-repo-check", "-c", 'model_reasoning_effort="medium"', img_prompt],
-                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180,
-            )
+        subprocess.run(
+            ["codex", "exec", "--skip-git-repo-check", "-c", 'model_reasoning_effort="medium"', img_prompt],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180,
+        )
         if os.path.exists(img_path) and os.path.getsize(img_path) > 1000:
             data = base64.b64encode(open(img_path, "rb").read()).decode()
             spec.setdefault("blocks", [])

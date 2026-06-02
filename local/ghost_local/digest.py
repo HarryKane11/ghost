@@ -66,17 +66,19 @@ def digest_stream(
     summary = memory.fold(meeting_id, cfg, force=True)
     card = _summary_card(summary, when_label or "지금까지")
 
-    # 자동 조사 불가(능력 없음/미해결 없음/opt-out) → 요약 카드만.
+    # 1.5) 요약 카드를 '먼저' 보낸다 → 클라이언트 타임아웃 해제(조사가 느려도 카드는 떴음).
+    yield ("result", card)
+
+    # 자동 조사 불가(능력 없음/미해결 없음/opt-out) → 요약 카드로 끝.
     # 웹/MCP capability가 있는 백엔드만 외부 조사(ollama 등은 요약만 → 프라이버시 보존).
     question = _top_open_question(summary)
     caps = caps_for(cfg.backend)
     can_research = auto_research and (caps.web_search or caps.mcp) and bool(question)
     if not can_research:
         store.append_digest(meeting_id, card)
-        yield ("result", card)
         return
 
-    # 2) 가장 중요한 미해결 1건만 실제 조사(R1: 1건 한정 — 비용·지연 억제).
+    # 2) 가장 중요한 미해결 1건만 실제 조사(R1: 1건 한정). best-effort — 실패/지연돼도 요약은 이미 떴다.
     yield ("progress", {"text": f"미해결 조사: {question[:48]}"})
     research_blocks: List[Dict[str, Any]] = []
     ctx = memory.build_context(meeting_id)
@@ -87,11 +89,11 @@ def digest_stream(
                 yield ("progress", payload if isinstance(payload, dict) else {"text": payload})
             elif kind == "result" and isinstance(payload, dict):
                 research_blocks = payload.get("blocks") or []
-    except Exception:  # noqa: BLE001 — 조사 실패해도 요약 카드는 보낸다
+    except Exception:  # noqa: BLE001 — 조사 실패해도 요약 카드는 이미 전달됨
         research_blocks = []
 
     if research_blocks:
         card["blocks"].append({"type": "heading", "text": f"🔎 {question}"})
         card["blocks"].extend(research_blocks)
+        yield ("result", card)  # 조사 결과 포함해 카드 갱신(2번째 result)
     store.append_digest(meeting_id, card)
-    yield ("result", card)

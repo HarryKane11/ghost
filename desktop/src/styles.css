@@ -224,17 +224,18 @@ body {
 }
 .phantom-roam { animation: phantom-roam 15s ease-in-out infinite, phantom-roam-fade 8s ease-in-out infinite; will-change: transform, opacity; }
 
-/* 유령이 좌우로 스윽 날아가는 sweep (스트리밍·듣는 중 표시). 컨테이너는 relative+overflow-hidden. */
+/* 유령이 좌우로 스윽 날아가는 sweep. left를 0→100%로 '선형' 이동해 블럭 딜레이(선형)와 싱크.
+   (이전엔 -14→114% + ease-in-out이라 가운데서 빨라져 블럭과 어긋났음.) */
 @keyframes phantom-fly {
-  0%   { left: -14%; transform: rotate(-5deg) translateY(0)  scaleX(1);  opacity: 0; }
-  12%  { opacity: .9; }
-  50%  { transform: rotate(4deg) translateY(-4px) scaleX(1.04); }
-  88%  { opacity: .9; }
-  100% { left: 114%; transform: rotate(-5deg) translateY(0) scaleX(1);  opacity: 0; }
+  0%   { left: 0%;   transform: translateX(-50%) translateY(-2px) rotate(-3deg); opacity: 0; }
+  10%  { opacity: .95; }
+  50%  { transform: translateX(-50%) translateY(-5px) rotate(3deg); }
+  90%  { opacity: .95; }
+  100% { left: 100%; transform: translateX(-50%) translateY(-2px) rotate(-3deg); opacity: 0; }
 }
 .phantom-fly {
   position: absolute; top: 50%; margin-top: -9px;
-  animation: phantom-fly var(--fly-dur, 3.1s) cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  animation: phantom-fly var(--fly-dur, 3.1s) linear infinite;   /* 선형 = 블럭과 싱크 */
   will-change: left, transform, opacity;
   filter: drop-shadow(0 2px 8px color-mix(in srgb, var(--spark) 40%, transparent));
 }
@@ -253,10 +254,31 @@ body {
 }
 .ghost-line { animation: ghost-line .5s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+/* ── 마리오 블럭 효과 ──────────────────────────────────────────────
+   곧 타이핑될 구조를 사각형(블럭)들이 미리 보여주고, 유령이 좌→우로 지나가면
+   그 자리의 블럭이 위로 출렁(bump)이며 진해졌다 흐려진다. 각 블럭의 animation-delay를
+   인덱스에 비례해 어긋내(--bd) 유령의 가로 위치와 싱크. 컨테이너는 세로로 안 잘리게 한다. */
+@keyframes block-bump {
+  0%   { transform: translateY(0);    opacity: .26; }
+  6%   { transform: translateY(-7px); opacity: 1; }   /* 유령이 머리로 친 순간: 위로 + 진해짐 */
+  9%   { transform: translateY(-7px); opacity: 1; }
+  22%  { transform: translateY(0);    opacity: .26; } /* 다시 가라앉고 흐려짐 */
+  100% { transform: translateY(0);    opacity: .26; }
+}
+.block-bump {
+  background: color-mix(in srgb, var(--spark) 38%, var(--hairline));
+  animation: block-bump var(--dur, 3s) cubic-bezier(0.34, 1.56, 0.5, 1) infinite;
+  animation-delay: var(--bd, 0s);
+  will-change: transform, opacity;
+}
+/* 블럭 위를 나는 유령 — 세로로 잘리지 않게 컨테이너는 overflow-x만 숨긴다 */
+.ghost-blocks { overflow-x: clip; }
+
 @media (prefers-reduced-motion: reduce) {
   .phantom, .phantom-glow, .phantom-inner, .phantom-roam,
-  .phantom-fly, .fly-trail, .ghost-line { animation: none !important; }
+  .phantom-fly, .fly-trail, .ghost-line, .block-bump { animation: none !important; }
   .phantom-fly { display: none; }
+  .block-bump { opacity: .4; }
   .ghost-line { clip-path: none; opacity: 1; filter: none; }
 }
 

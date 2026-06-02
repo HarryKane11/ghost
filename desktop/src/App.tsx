@@ -112,11 +112,15 @@ function CommandStep({ item, active }: { item: api.ProgressItem; active: boolean
   );
 }
 
-/** 유령이 좌우로 스윽 날아가는 스트립. 스트리밍/듣는 중 연출. */
-function GhostFly({ dur = 3.1, size = 16, className }: { dur?: number; size?: number; className?: string }) {
+/** 마리오 블럭 연출: 곧 타이핑될 구조를 사각형들이 보여주고, 유령이 지나가면 블럭이
+ *  머리 맞은 듯 위로 출렁이며 진해졌다 흐려진다. 세로로 잘리지 않게 overflow는 x만 숨긴다. */
+function GhostBlocks({ dur = 2.8, count = 16, size = 18, className }: { dur?: number; count?: number; size?: number; className?: string }) {
   return (
-    <div className={cn("pointer-events-none relative overflow-hidden", className)} style={{ height: size + 4 }} aria-hidden>
-      <div className="fly-trail absolute inset-x-0 top-1/2 h-px -translate-y-1/2" style={{ ["--fly-dur" as any]: `${dur}s` }} />
+    <div className={cn("ghost-blocks pointer-events-none relative flex items-center gap-1.5 py-2", className)} aria-hidden>
+      {Array.from({ length: count }).map((_, i) => (
+        <span key={i} className="block-bump h-2.5 w-2.5 shrink-0 rounded-[3px]"
+          style={{ ["--dur" as any]: `${dur}s`, ["--bd" as any]: `${((i + 0.5) / count) * dur}s` }} />
+      ))}
       <span className="phantom-fly text-spark-deep" style={{ ["--fly-dur" as any]: `${dur}s` }}>
         <Ghost style={{ width: size, height: size }} />
       </span>
@@ -231,6 +235,7 @@ export default function App() {
   const sttErrRef = useRef(0);
   const liveCardRef = useRef(0);   // 마지막 실시간 카드 시각(쿨다운)
   const digestTextRef = useRef("");  // 최근 다이제스트 내용(실시간 카드 dedup용)
+  const digestBusyRef = useRef(false);  // 다이제스트 진행 중 → 중복 생성 방지(pile-up)
   const inputRef = useRef<HTMLInputElement | null>(null);
   const demoTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const { start, stop, level, speaking } = useListening();
@@ -256,16 +261,18 @@ export default function App() {
   // 디스플레이 모드 → Electron 창 크기/always-on-top 동기화 + 번역 언어 목록
   useEffect(() => { (window as { ghost?: { setWindowMode?: (m: string) => void } }).ghost?.setWindowMode?.(displayMode); }, [displayMode]);
   useEffect(() => { api.getTranslateLangs().then(setTransLangs); }, []);
-  // 인터뷰 모드: 번역 안 된 전사 줄을 하나씩 순차 번역(언어별 캐시)
+  // 인터뷰 모드: 번역 안 된 전사 줄을 하나씩 순차 번역(언어별 캐시).
+  // ref 가드로 한 번에 하나만 — 진행 중 번역을 새 줄/상태 변화로 취소하지 않는다(이전 버그: 첫 줄 뒤 멈춤).
+  const translatingRef = useRef(false);
   useEffect(() => {
-    if (displayMode !== "interview") return;
-    const pending = transcript.find((tr) => translations[`${transLang}:${tr.id}`] === undefined);
+    if (displayMode !== "interview" || translatingRef.current) return;
+    const pending = transcript.find((ln) => translations[`${transLang}:${ln.id}`] === undefined);
     if (!pending) return;
-    let alive = true;
-    api.translateText(pending.text, transLang).then((tr) => {
-      if (alive) setTranslations((m) => ({ ...m, [`${transLang}:${pending.id}`]: tr || "" }));
-    });
-    return () => { alive = false; };
+    translatingRef.current = true;
+    const key = `${transLang}:${pending.id}`;
+    api.translateText(pending.text, transLang)
+      .then((tr) => setTranslations((m) => ({ ...m, [key]: tr || "" })))
+      .finally(() => { translatingRef.current = false; });
   }, [displayMode, transLang, transcript, translations]);
 
   // 패널 분할 드래그(리사이즈 핸들러)
@@ -421,13 +428,16 @@ export default function App() {
   // 5분 다이제스트(설정 가능) — 회의의 기본 능동 동작. 롤링 요약 + 미해결 1건 자동조사.
   const runDigest = useCallback((label: string) => {
     const mid = meetingIdRef.current;
-    if (!mid) return;
+    if (!mid || digestBusyRef.current) return;   // 진행 중이면 건너뜀(pile-up 방지)
+    digestBusyRef.current = true;
+    const backstop = setTimeout(() => { digestBusyRef.current = false; }, 90000);  // 멈춰도 다음 주기는 풀림
     runStream({
       query: "다이제스트", ack: "", pinned: true, dropIfEmpty: true,
       starter: (h) => api.streamDigest(mid, {
         onProgress: h.onProgress,
-        onResult: (spec, b) => { digestTextRef.current = (spec?.blocks || []).map((x: any) => x.text || "").join(" "); h.onResult(spec, b); },
-        onError: h.onError,
+        // 요약 카드(첫 result)가 오면 busy 해제 — 조사는 백그라운드로 이어지고 다음 주기는 자유롭게.
+        onResult: (spec, b) => { clearTimeout(backstop); digestBusyRef.current = false; digestTextRef.current = (spec?.blocks || []).map((x: any) => x.text || "").join(" "); h.onResult(spec, b); },
+        onError: () => { clearTimeout(backstop); digestBusyRef.current = false; h.onError(); },
       }, autoResearch, label),
     });
   }, [runStream, autoResearch]);
@@ -464,6 +474,8 @@ export default function App() {
     // wakeword("재키"/"자비스"/"고스트")로 부르면 음성으로 응답한다.
     const wake = WAKE_RE.test(text);
     const q = wake ? text.replace(WAKE_RE, "").trim() : text;
+    // 인터뷰 모드: 카드가 초점이 아니므로 비-호명 발화는 라우팅(judge) 생략 → codex를 번역에 양보(거의 실시간).
+    if (displayMode === "interview" && !wake) return;
     let r: api.Route;
     try { r = await api.route(wake ? q || text : text, histCtx, mid); } catch { return; }
     if (r.kind === "chat") { showChat(q || text, r.say || ""); if (wake && r.say) speak(r.say); return; }
@@ -484,7 +496,7 @@ export default function App() {
     if (actingRef.current || queueRef.current.length) return;
     liveCardRef.current = Date.now();
     startAction(qq, r.say || "", historyRef.current.join("\n"), false);
-  }, [showChat, startAction, pushHistory, speak, t, source, liveSens]);
+  }, [showChat, startAction, pushHistory, speak, t, source, liveSens, displayMode]);
 
   const toggleActive = useCallback(async () => {
     if (active) {
@@ -498,7 +510,7 @@ export default function App() {
         Notification.requestPermission().catch(() => {});
       }
       // 새 회의 시작 → 일시 폴더 생성. 전사·요약·회의록이 여기 누적된다.
-      liveCardRef.current = 0; digestTextRef.current = "";
+      liveCardRef.current = 0; digestTextRef.current = ""; digestBusyRef.current = false;
       try { const m = await api.startMeeting(); meetingIdRef.current = m.id; setMeetingTitle(m.title); setMeetingFolder(m.folder || ""); }
       catch { meetingIdRef.current = ""; }
       setActive(true); await start(onUtterance, source, source === "mic" ? micId || undefined : undefined);
@@ -855,14 +867,9 @@ export default function App() {
                 </div>
               ));
             })()}
-            {/* 듣는 중: 유령이 좌우로 날며 다음 문장을 기다리는 shimmer */}
+            {/* 듣는 중: 곧 들어올 문장 구조를 블럭으로 보여주고 유령이 지나가며 출렁 */}
             {active && !tq.trim() && !demoOn && (
-              <div className="relative mt-1 flex items-center gap-2">
-                <div className="relative h-4 flex-1 overflow-hidden rounded-full">
-                  <div className="mist absolute inset-y-0 left-0 h-2 w-3/5 self-center rounded-full" style={{ top: "50%", transform: "translateY(-50%)" }} />
-                  <span className="phantom-fly text-spark-deep/70" style={{ ["--fly-dur" as any]: "2.6s" }}><Ghost className="size-3.5" /></span>
-                </div>
-              </div>
+              <GhostBlocks dur={2.6} size={15} count={18} className="mt-1" />
             )}
             </>)}
             <div ref={transEndRef} />
@@ -922,8 +929,8 @@ export default function App() {
                   </div>
                   {it.status === "working" ? (
                     <div className="relative space-y-3 py-1">
-                      {/* 유령이 좌우로 스윽 날아다니는 연출 */}
-                      <GhostFly dur={3.1} size={18} className="-mt-1" />
+                      {/* 마리오 블럭: 구조를 보여주는 사각형들 위로 유령이 지나가며 출렁 */}
+                      <GhostBlocks dur={3} size={18} />
                       {it.ack && <p className="wisp text-[13px] italic leading-relaxed text-steel">{it.ack}</p>}
                       <GhostLoader />
                       <div className="space-y-1.5">
