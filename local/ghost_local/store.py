@@ -304,6 +304,36 @@ def get_minutes(meeting_id: str) -> Optional[dict]:
     return _read_json(_meeting_path(meeting_id) / "minutes.json")
 
 
+def append_script(meeting_id: str, record: dict) -> None:
+    """정제된 문단(스크립트) 1개를 script.jsonl에 append. record={cleaned, bullets}."""
+    with _LOCK:
+        folder = _meeting_path(meeting_id)
+        if not folder.exists():
+            return
+        rec = {"t": _now_iso(), **record}
+        with open(folder / "script.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def read_script(meeting_id: str) -> List[dict]:
+    """스크립트(정제 문단) 전체. [{t, cleaned, bullets}]."""
+    path = _meeting_path(meeting_id) / "script.jsonl"
+    if not path.exists():
+        return []
+    out: List[dict] = []
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            raw = raw.strip()
+            if raw:
+                try:
+                    out.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    continue
+    except Exception:  # noqa: BLE001
+        return out
+    return out
+
+
 def append_digest(meeting_id: str, spec: dict) -> None:
     with _LOCK:
         folder = _meeting_path(meeting_id)

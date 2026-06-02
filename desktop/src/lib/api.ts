@@ -89,6 +89,10 @@ export async function setMeetingFolder(meetingId: string, folder: string): Promi
 export async function getMeeting(meetingId: string): Promise<any | null> {
   try { return (await (await fetch(`${BASE}/api/meetings/${meetingId}`)).json()).meeting ?? null; } catch { return null; }
 }
+export type ScriptParagraph = { t?: string; cleaned: string; bullets: string[] };
+export async function getScript(meetingId: string, flush = false): Promise<ScriptParagraph[]> {
+  try { return (await (await fetch(`${BASE}/api/meetings/${meetingId}/script${flush ? "?flush=true" : ""}`)).json()).script || []; } catch { return []; }
+}
 export async function setMeetingContext(meetingId: string, context: string): Promise<boolean> {
   try {
     const r = await fetch(`${BASE}/api/meetings/${meetingId}/context`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ context }) });

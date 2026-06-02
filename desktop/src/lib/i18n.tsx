@@ -26,6 +26,11 @@ const DICT: Record<string, Record<Lang, string>> = {
   "trans.titleEdit": { ko: "회의 제목 (클릭해 편집)", en: "Meeting title (click to edit)", zh: "会议标题（点击编辑）" },
   "trans.context": { ko: "맥락 입력 (정확도↑)", en: "Add context (improves accuracy)", zh: "添加背景（提升准确度）" },
   "trans.copy": { ko: "전사 복사", en: "Copy transcript", zh: "复制转写" },
+  "trans.tabRaw": { ko: "대화 기록", en: "Transcript", zh: "对话记录" },
+  "trans.tabScript": { ko: "스크립트", en: "Script", zh: "脚本" },
+  "trans.scriptEmpty": { ko: "한 문단이 쌓이면 정제된 스크립트로 정리돼요.", en: "Once a paragraph accumulates, it's refined into a clean script.", zh: "积累一段后会整理为精炼脚本。" },
+  "trans.scriptLoading": { ko: "스크립트 정리 중…", en: "Building script…", zh: "正在整理脚本…" },
+  "trans.scriptLive": { ko: "문단이 완성될 때마다 갱신돼요.", en: "Updates as each paragraph completes.", zh: "每完成一段即更新。" },
   "trans.folder": { ko: "폴더", en: "Folder", zh: "文件夹" },
   // Ask 패널 추천 프롬프트
   "ask.summary": { ko: "주요 내용 요약", en: "Summarize key points", zh: "总结要点" },

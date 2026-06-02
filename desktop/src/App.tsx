@@ -198,6 +198,9 @@ export default function App() {
   const [micId, setMicId] = usePref<string>("ghost.micId", "");
   const [tq, setTq] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [transTab, setTransTab] = useState<"raw" | "script">("raw");  // 대화기록 / 스크립트
+  const [scriptParas, setScriptParas] = useState<api.ScriptParagraph[]>([]);
+  const [scriptLoading, setScriptLoading] = useState(false);
   const [transcript, setTranscript] = useState<{ id: string; text: string }[]>([]);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [input, setInput] = useState("");
@@ -273,6 +276,22 @@ export default function App() {
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
     return () => clearInterval(id);
   }, [active]);
+
+  // 스크립트 탭: 열려 있으면 정제 문단을 불러오고, 청취 중엔 주기적으로 갱신(실시간 문단 요약).
+  useEffect(() => {
+    if (transTab !== "script") return;
+    const mid = meetingIdRef.current;
+    if (!mid) { setScriptParas([]); return; }
+    let alive = true;
+    const load = async () => {
+      setScriptLoading(true);
+      const s = await api.getScript(mid, !active);  // 정지 상태면 꼬리까지 flush
+      if (alive) { setScriptParas(s); setScriptLoading(false); }
+    };
+    load();
+    const id = active ? setInterval(load, 15000) : null;
+    return () => { alive = false; if (id) clearInterval(id); };
+  }, [transTab, active]);
 
   // 창이 비활성일 때 카드가 뜨면 데스크탑 알림
   const notify = useCallback((title: string, body: string) => {
@@ -676,7 +695,14 @@ export default function App() {
         <section className="flex min-h-0 flex-col border-r border-hairline">
           <div className="flex items-center gap-2 px-4 py-2.5">
             <AudioLines className="size-3.5 text-stone" />
-            <span className="text-[11px] font-medium uppercase tracking-wide text-stone">{t("trans.title")}</span>
+            <div className="flex items-center gap-1">
+              {(["raw", "script"] as const).map((tab) => (
+                <button key={tab} onClick={() => setTransTab(tab)}
+                  className={cn("rounded-md px-2 py-0.5 text-[11.5px] font-medium transition-colors", transTab === tab ? "bg-surface text-foreground" : "text-stone hover:text-foreground")}>
+                  {tab === "raw" ? t("trans.tabRaw") : t("trans.tabScript")}
+                </button>
+              ))}
+            </div>
             <div className="ml-auto flex items-center gap-1">
               <button onClick={openContext} title={t("trans.context")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><FileText className="size-3.5" /></button>
               <button onClick={() => { setSearchOpen((v) => !v); if (searchOpen) setTq(""); }} title={t("trans.search")} className={cn("grid size-6 place-items-center rounded-md hover:bg-surface hover:text-foreground", searchOpen ? "text-foreground" : "text-stone")}><Search className="size-3.5" /></button>
@@ -736,6 +762,30 @@ export default function App() {
             </span>
           </div>
           <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-4 py-3">
+            {/* 스크립트 탭: 문단별 불릿 요약 + 정제 본문 */}
+            {transTab === "script" ? (
+              <div className="space-y-3.5">
+                {scriptParas.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-hairline px-3 py-6 text-center text-[12px] text-stone">
+                    {scriptLoading ? t("trans.scriptLoading") : t("trans.scriptEmpty")}
+                  </p>
+                ) : scriptParas.map((p, i) => (
+                  <div key={i} className="ghost-line">
+                    {p.bullets?.length > 0 && (
+                      <ul className="mb-1 space-y-0.5">
+                        {p.bullets.map((b, j) => (
+                          <li key={j} className="flex gap-1.5 text-[12.5px] font-medium leading-relaxed text-foreground">
+                            <span className="mt-1.5 size-1 shrink-0 rounded-full bg-spark" />{b}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <p className="text-[12.5px] leading-relaxed text-stone">{p.cleaned}</p>
+                  </div>
+                ))}
+                {active && <p className="text-[11px] italic text-stone">{t("trans.scriptLive")}</p>}
+              </div>
+            ) : (<>
             {transcript.length === 0 && <p className="rounded-lg border border-dashed border-hairline px-3 py-6 text-center text-[12px] text-stone">{active ? t("trans.emptyActive") : t("trans.emptyIdle")}</p>}
             {(() => {
               const q = tq.trim().toLowerCase();
@@ -753,6 +803,7 @@ export default function App() {
                 </div>
               </div>
             )}
+            </>)}
             <div ref={transEndRef} />
           </div>
         </section>

@@ -476,6 +476,15 @@ def set_meeting_context(meeting_id: str, req: ContextReq) -> dict:
     return {"ok": meta is not None, "meeting": meta}
 
 
+@app.get("/api/meetings/{meeting_id}/script")
+def get_script_ep(meeting_id: str, flush: bool = False) -> dict:
+    """스크립트(문단별 정제+불릿 요약). 새 문단을 증분 처리 후 전체 반환. flush=true면 꼬리까지."""
+    from ghost_local import script
+    if store.get_meta(meeting_id) is None:
+        return {"script": []}
+    return {"script": script.build_script(meeting_id, _cfg(), flush_tail=flush)}
+
+
 # ── 회의록 저장 위치 (사용자 설정) ───────────────────────────────────────────
 @app.get("/api/storage")
 def get_storage() -> dict:
