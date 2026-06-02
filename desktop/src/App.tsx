@@ -188,6 +188,8 @@ export default function App() {
   const [backendMenuOpen, setBackendMenuOpen] = useState(false);
   const [ctxOpen, setCtxOpen] = useState(false);
   const [ctxText, setCtxText] = useState("");
+  const [recentMeetings, setRecentMeetings] = useState<api.MeetingMeta[]>([]);
+  const [atOpen, setAtOpen] = useState(false);  // @ 과거 회의 참조 드롭다운
   const [onboard, setOnboard] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [demoOn, setDemoOn] = useState(false);
@@ -237,6 +239,9 @@ export default function App() {
     try { setStatus(await api.getStatus()); setBackendErr(false); } catch { setBackendErr(true); }
   }, []);
   useEffect(() => { refreshStatus(); }, [refreshStatus]);
+  // @ 참조용 최근 회의 목록 (메뉴 열 때·회의 종료 시 갱신)
+  const loadRecentMeetings = useCallback(() => { api.getMeetings().then(setRecentMeetings).catch(() => {}); }, []);
+  useEffect(() => { loadRecentMeetings(); }, [loadRecentMeetings]);
   // 첫 실행이면 온보딩을 띄운다.
   useEffect(() => { if (!localStorage.getItem(ONBOARDED_KEY)) setOnboard(true); }, []);
   // STT 모델 준비될 때까지 폴링 (pre-warm 완료 감지)
@@ -446,6 +451,21 @@ export default function App() {
     catch (e) { setActive(false); flash(t(captureErrKey(e))); }
   }, [active, start, stop, onUtterance, source, micId, t]);
 
+  // @[제목] 참조를 풀어 해당 지난 회의 요약을 쿼리에 덧붙인다.
+  const resolveRefs = useCallback(async (q: string): Promise<string> => {
+    const ids = [...q.matchAll(/@\[([^\]]+)\]/g)].map((m) => m[1]);
+    if (!ids.length) return q;
+    const parts: string[] = [];
+    for (const title of ids) {
+      const mt = recentMeetings.find((m) => m.title === title) || recentMeetings.find((m) => m.title.includes(title));
+      if (!mt) continue;
+      const full = await api.getMeeting(mt.id);
+      const summary = full?.summary || full?.minutes?.spoken || "";
+      if (summary) parts.push(`### ${mt.title}\n${summary}`);
+    }
+    return parts.length ? `${q}\n\n[참조한 지난 회의]\n${parts.join("\n\n")}` : q;
+  }, [recentMeetings]);
+
   const runManual = useCallback(async (query: string) => {
     const q = query.trim();
     if (!q) return;
@@ -453,13 +473,14 @@ export default function App() {
     pushHistory(`요청: ${q}`);
     // 회의록/이미지 요청은 회의록 생성 경로(실제 이미지)로
     if (isMinutesReq(q) && transcriptRef.current.length) { generateMinutes("네, 전체 회의록과 손글씨 이미지까지 정리해 드릴게요."); return; }
+    const qResolved = await resolveRefs(q);   // @[지난 회의] 참조 주입
     const histCtx = historyRef.current.slice(-12).join("\n");
     let r: api.Route | null = null;
-    try { r = await api.route(q, histCtx); } catch { /* fall through */ }
+    try { r = await api.route(qResolved, histCtx, meetingIdRef.current); } catch { /* fall through */ }
     if (r?.kind === "chat") { showChat(q, r.say || ""); return; }
     if (actingRef.current || queueRef.current.length) { flash(t("toast.busy")); return; }
-    startAction(r?.query || q, r?.say || "", historyRef.current.join("\n"));
-  }, [showChat, startAction, pushHistory, pushFeed, generateMinutes, t]);
+    startAction(r?.query || qResolved, r?.say || "", historyRef.current.join("\n"));
+  }, [showChat, startAction, pushHistory, pushFeed, generateMinutes, resolveRefs, t]);
 
   const chooseBackend = useCallback(async (b: string) => {
     try { setStatus(await api.setBackend(b)); } catch { flash(t("toast.backendFail")); }
@@ -791,20 +812,53 @@ export default function App() {
         </section>
       </div>
 
-      {/* 하단: 컴팩트 듣기 + 입력 */}
+      {/* 하단: 추천 프롬프트 칩 + 컴팩트 듣기 + 입력 (@로 지난 회의 참조) */}
       <footer className="shrink-0 border-t border-hairline bg-surface-soft/50 px-4 py-2.5">
-        <div className="mx-auto flex max-w-3xl items-center gap-2">
-          <button onClick={toggleActive} title={active ? "청취 정지" : "상시 청취 시작"}
-            className={cn("relative grid size-10 shrink-0 place-items-center rounded-full transition-colors", active ? "bg-ink text-canvas" : "border border-hairline bg-canvas text-steel hover:text-foreground")}>
-            {active && <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-spark ring-2 ring-background" />}
-            {active ? <Square className="size-3.5" /> : <Mic className="size-4" />}
-          </button>
-          {thinking && <Loader2 className="size-4 shrink-0 animate-spin text-stone" />}
-          <form onSubmit={(e) => { e.preventDefault(); runManual(input); setInput(""); }} className="flex flex-1 items-center gap-2">
-            <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder={t("footer.placeholder")}
-              className="h-10 flex-1 rounded-full border border-hairline bg-canvas px-4 text-[14px] outline-none placeholder:text-stone focus:border-ink/40" />
-            <button type="submit" disabled={!input.trim()} className="grid size-10 shrink-0 place-items-center rounded-full bg-ink text-canvas disabled:opacity-40"><Send className="size-4" /></button>
-          </form>
+        <div className="mx-auto max-w-3xl">
+          {/* 추천 프롬프트 칩 (Ask 패널) */}
+          {!thinking && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              {(["ask.summary", "ask.actions", "ask.decisions", "ask.terms"] as const).map((k) => (
+                <button key={k} onClick={() => runManual(t(k))}
+                  className="inline-flex items-center gap-1 rounded-full border border-hairline bg-canvas px-2.5 py-1 text-[11.5px] text-steel hover:border-ink/30 hover:text-foreground">
+                  <Sparkles className="size-3 text-spark-deep" /> {t(k)}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="relative flex items-center gap-2">
+            <button onClick={toggleActive} title={active ? "청취 정지" : "상시 청취 시작"}
+              className={cn("relative grid size-10 shrink-0 place-items-center rounded-full transition-colors", active ? "bg-ink text-canvas" : "border border-hairline bg-canvas text-steel hover:text-foreground")}>
+              {active && <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-spark ring-2 ring-background" />}
+              {active ? <Square className="size-3.5" /> : <Mic className="size-4" />}
+            </button>
+            {thinking && <Loader2 className="size-4 shrink-0 animate-spin text-stone" />}
+            {/* @ 지난 회의 참조 드롭다운 */}
+            {atOpen && recentMeetings.length > 0 && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setAtOpen(false)} />
+                <div className="absolute bottom-12 left-12 z-30 max-h-56 w-72 overflow-y-auto rounded-xl border border-hairline bg-background p-1 shadow-lg">
+                  <div className="px-2 py-1 text-[10.5px] text-stone">{t("ask.refHint")}</div>
+                  {recentMeetings
+                    .filter((m) => { const q = (input.match(/@(\S*)$/) || [])[1] || ""; return !q || m.title.toLowerCase().includes(q.toLowerCase()); })
+                    .slice(0, 6)
+                    .map((m) => (
+                      <button key={m.id} onClick={() => { setInput((v) => v.replace(/@(\S*)$/, `@[${m.title}] `)); setAtOpen(false); inputRef.current?.focus(); }}
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-steel hover:bg-surface-soft">
+                        <FileText className="size-3.5 shrink-0 text-stone" /><span className="truncate">{m.title}</span>
+                      </button>
+                    ))}
+                </div>
+              </>
+            )}
+            <form onSubmit={(e) => { e.preventDefault(); runManual(input); setInput(""); setAtOpen(false); }} className="flex flex-1 items-center gap-2">
+              <input ref={inputRef} value={input}
+                onChange={(e) => { const v = e.target.value; setInput(v); setAtOpen(/@(\S*)$/.test(v)); }}
+                placeholder={t("footer.placeholder")}
+                className="h-10 flex-1 rounded-full border border-hairline bg-canvas px-4 text-[14px] outline-none placeholder:text-stone focus:border-ink/40" />
+              <button type="submit" disabled={!input.trim()} className="grid size-10 shrink-0 place-items-center rounded-full bg-ink text-canvas disabled:opacity-40"><Send className="size-4" /></button>
+            </form>
+          </div>
         </div>
       </footer>
 

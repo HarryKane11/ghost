@@ -25,6 +25,12 @@ const DICT: Record<string, Record<Lang, string>> = {
   "trans.title": { ko: "실시간 전사", en: "Live transcript", zh: "实时转写" },
   "trans.titleEdit": { ko: "회의 제목 (클릭해 편집)", en: "Meeting title (click to edit)", zh: "会议标题（点击编辑）" },
   "trans.context": { ko: "맥락 입력 (정확도↑)", en: "Add context (improves accuracy)", zh: "添加背景（提升准确度）" },
+  // Ask 패널 추천 프롬프트
+  "ask.summary": { ko: "주요 내용 요약", en: "Summarize key points", zh: "总结要点" },
+  "ask.actions": { ko: "할 일 정리", en: "List action items", zh: "整理待办" },
+  "ask.decisions": { ko: "결정사항 정리", en: "List decisions", zh: "整理决定" },
+  "ask.terms": { ko: "핵심 용어 정리", en: "Explain key terms", zh: "整理关键术语" },
+  "ask.refHint": { ko: "@ 지난 회의 참조", en: "@ reference a past meeting", zh: "@ 引用过去的会议" },
   "trans.titlePlaceholder": { ko: "회의 제목", en: "Meeting title", zh: "会议标题" },
   "trans.mic": { ko: "마이크", en: "Mic", zh: "麦克风" },
   // 맥락 입력 모달
