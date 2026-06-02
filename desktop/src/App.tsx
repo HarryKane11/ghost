@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, SlidersHorizontal, AudioLines, Square,
-  HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown,
+  HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -174,6 +174,8 @@ export default function App() {
   const [thinking, setThinking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [backendMenuOpen, setBackendMenuOpen] = useState(false);
+  const [ctxOpen, setCtxOpen] = useState(false);
+  const [ctxText, setCtxText] = useState("");
   const [onboard, setOnboard] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [demoOn, setDemoOn] = useState(false);
@@ -490,6 +492,20 @@ export default function App() {
     }
   }, [feed]);
 
+  // 맥락 입력(상황·주제·고유명사) — brain·요약 정확도↑. 열 때 현재 회의 맥락을 불러온다.
+  const openContext = useCallback(async () => {
+    const mid = meetingIdRef.current;
+    if (mid) { const m = await api.getMeeting(mid); setCtxText(m?.user_context || ""); }
+    setCtxOpen(true);
+  }, []);
+  const saveContext = useCallback(async () => {
+    const mid = meetingIdRef.current;
+    if (!mid) { flash(t("toast.ctxNoMeeting")); return; }
+    await api.setMeetingContext(mid, ctxText);
+    setCtxOpen(false);
+    flash(t("toast.ctxSaved"));
+  }, [ctxText, t]);
+
   // 회의 제목 편집 — 폴더명은 불변, 제목 필드만 갱신.
   const commitTitle = useCallback((title: string) => {
     const v = title.trim();
@@ -616,6 +632,7 @@ export default function App() {
             <AudioLines className="size-3.5 text-stone" />
             <span className="text-[11px] font-medium uppercase tracking-wide text-stone">{t("trans.title")}</span>
             <div className="ml-auto flex items-center gap-1">
+              <button onClick={openContext} title={t("trans.context")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><FileText className="size-3.5" /></button>
               <button onClick={() => { setSearchOpen((v) => !v); if (searchOpen) setTq(""); }} title={t("trans.search")} className={cn("grid size-6 place-items-center rounded-md hover:bg-surface hover:text-foreground", searchOpen ? "text-foreground" : "text-stone")}><Search className="size-3.5" /></button>
               <button onClick={exportMd} title={t("trans.export")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><Download className="size-3.5" /></button>
               <button onClick={clearSession} disabled={active} title={t("trans.clear")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground disabled:opacity-40"><Trash2 className="size-3.5" /></button>
@@ -767,6 +784,26 @@ export default function App() {
           </form>
         </div>
       </footer>
+
+      {ctxOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => setCtxOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl border border-hairline bg-background p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-1 flex items-center gap-2">
+              <FileText className="size-4 text-steel" />
+              <h2 className="text-[15px] font-semibold tracking-tight">{t("ctx.title")}</h2>
+              <button onClick={() => setCtxOpen(false)} className="ml-auto grid size-7 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground"><X className="size-4" /></button>
+            </div>
+            <p className="mb-3 text-[12px] leading-relaxed text-stone">{t("ctx.desc")}</p>
+            <textarea value={ctxText} onChange={(e) => setCtxText(e.target.value)}
+              rows={7} placeholder={t("ctx.placeholder")}
+              className="w-full resize-none rounded-xl border border-hairline bg-surface-soft p-3 text-[13px] leading-relaxed text-foreground outline-none focus:border-ink/40" />
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button onClick={() => setCtxOpen(false)} className="h-9 rounded-lg border border-hairline px-3.5 text-[13px] text-steel hover:text-foreground">{t("ctx.cancel")}</button>
+              <button onClick={saveContext} className="h-9 rounded-lg bg-ink px-4 text-[13px] font-medium text-canvas">{t("ctx.save")}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SettingsMenu open={menuOpen} onClose={() => setMenuOpen(false)} status={status}
         onStatus={setStatus}

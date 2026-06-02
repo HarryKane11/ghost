@@ -129,6 +129,7 @@ def create_meeting(backend: str = "", lang: str = "ko") -> dict:
             "id": meeting_id,
             "title": _default_title(started_at),
             "title_custom": False,  # 사용자가 직접 수정했는지 (자동 제목 갱신 억제용)
+            "user_context": "",     # 사용자가 입력한 회의 맥락(상황·주제·고유명사) — 정확도↑
             "started_at": started_at,
             "ended_at": None,
             "backend": backend,
@@ -159,6 +160,16 @@ def update_meta(meeting_id: str, patch: Dict[str, Any]) -> Optional[dict]:
         meta.update(patch)
         _write_json(folder / "meeting.json", meta)
         return meta
+
+
+def set_context(meeting_id: str, text: str) -> Optional[dict]:
+    """사용자가 입력한 회의 맥락(상황·주제·고유명사)을 저장. brain·요약 정확도에 쓰인다."""
+    return update_meta(meeting_id, {"user_context": (text or "").strip()})
+
+
+def get_context(meeting_id: str) -> str:
+    meta = get_meta(meeting_id)
+    return (meta or {}).get("user_context", "") if meta else ""
 
 
 def set_title(meeting_id: str, title: str) -> Optional[dict]:

@@ -458,6 +458,17 @@ def end_meeting_ep(meeting_id: str) -> dict:
     return {"ok": meta is not None, "meeting": meta}
 
 
+class ContextReq(BaseModel):
+    context: str
+
+
+@app.post("/api/meetings/{meeting_id}/context")
+def set_meeting_context(meeting_id: str, req: ContextReq) -> dict:
+    """회의 맥락(상황·주제·고유명사) 저장 → brain·요약 정확도↑."""
+    meta = store.set_context(meeting_id, req.context)
+    return {"ok": meta is not None, "meeting": meta}
+
+
 # ── 회의록 저장 위치 (사용자 설정) ───────────────────────────────────────────
 @app.get("/api/storage")
 def get_storage() -> dict:

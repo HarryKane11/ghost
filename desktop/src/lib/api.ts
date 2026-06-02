@@ -81,6 +81,12 @@ export async function setMeetingTitle(meetingId: string, title: string): Promise
 export async function getMeeting(meetingId: string): Promise<any | null> {
   try { return (await (await fetch(`${BASE}/api/meetings/${meetingId}`)).json()).meeting ?? null; } catch { return null; }
 }
+export async function setMeetingContext(meetingId: string, context: string): Promise<boolean> {
+  try {
+    const r = await fetch(`${BASE}/api/meetings/${meetingId}/context`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ context }) });
+    return (await r.json()).ok;
+  } catch { return false; }
+}
 
 export type ProgressItem = {
   text: string;

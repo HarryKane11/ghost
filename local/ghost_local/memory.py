@@ -78,7 +78,10 @@ def fold(meeting_id: str, cfg: Optional["brain.BrainConfig"] = None, force: bool
         return current
 
     new_lines = "\n".join(item.get("text", "") for item in transcript[folded:])
+    user_ctx = (meta.get("user_context") or "").strip()
+    ctx_block = f"[회의 배경(사용자 제공) — 고유명사 표기에 참고]\n{user_ctx}\n\n" if user_ctx else ""
     user = (
+        f"{ctx_block}"
         f"[기존 요약 상태]\n{json.dumps(current, ensure_ascii=False)}\n\n"
         f"[신규 발화]\n{new_lines}"
     )
@@ -147,6 +150,10 @@ def build_context(meeting_id: str, recent_n: int = RECENT_RAW_N) -> str:
     recent = transcript[-recent_n:] if recent_n > 0 else transcript
     recent_txt = "\n".join(item.get("text", "") for item in recent)
     blocks: List[str] = []
+    # 사용자가 입력한 맥락(상황·주제·고유명사)을 맨 앞에 — 고유명사 표기·요약 정확도↑.
+    user_ctx = (meta.get("user_context") or "").strip()
+    if user_ctx:
+        blocks.append("## 회의 배경 (사용자 제공)\n" + user_ctx)
     if summary_txt:
         blocks.append("## 지금까지의 회의 맥락\n" + summary_txt)
     if recent_txt:
