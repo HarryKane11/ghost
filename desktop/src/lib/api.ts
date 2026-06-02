@@ -239,6 +239,15 @@ export async function downloadSttModel(): Promise<SttModel | null> {
   try { return await (await fetch(`${BASE}/api/stt/model/download`, { method: "POST" })).json(); } catch { return null; }
 }
 
+// 전역 용어집 (Word Memory)
+export type GlossaryItem = { term: string; note?: string };
+export async function getGlossary(): Promise<GlossaryItem[]> {
+  try { return (await (await fetch(`${BASE}/api/glossary`)).json()).glossary || []; } catch { return []; }
+}
+export async function setGlossary(items: GlossaryItem[]): Promise<GlossaryItem[]> {
+  try { return (await (await fetch(`${BASE}/api/glossary`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ glossary: items }) })).json()).glossary || []; } catch { return items; }
+}
+
 export type SttModelOption = { id: string; label: string; lang?: string; approx_gb?: number };
 export type SttModels = { local: SttModelOption[]; local_active: string; cloud: SttModelOption[]; cloud_active: string };
 export async function getSttModels(): Promise<SttModels | null> {

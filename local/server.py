@@ -503,6 +503,21 @@ def stt_model_download() -> dict:
     return stt.start_download()
 
 
+@app.get("/api/glossary")
+def get_glossary_ep() -> dict:
+    """사용자 전역 용어집(Word Memory)."""
+    return {"glossary": store.get_glossary()}
+
+
+class GlossaryReq(BaseModel):
+    glossary: list
+
+
+@app.post("/api/glossary")
+def set_glossary_ep(req: GlossaryReq) -> dict:
+    return {"ok": True, "glossary": store.set_glossary(req.glossary)}
+
+
 @app.get("/api/stt/models")
 def stt_models() -> dict:
     """선택 가능한 로컬/클라우드 STT 모델 목록 + 현재 활성 모델."""
@@ -666,7 +681,8 @@ def minutes_stream_ep(req: TranscriptReq) -> StreamingResponse:
     # meeting_id가 있으면 저장된 전사 전체 + 사용자 맥락을 쓴다(클라이언트 200줄 제한 우회, 정확도↑).
     has_meeting = bool(mid and store.get_meta(mid))
     transcript = store.transcript_text(mid) if has_meeting else req.transcript
-    user_ctx = store.get_context(mid) if has_meeting else ""
+    # 회의별 맥락 + 전역 용어집을 함께 codex에 주입(고유명사 정확도↑).
+    user_ctx = "\n".join(p for p in [store.glossary_text(), store.get_context(mid) if has_meeting else ""] if p)
 
     def gen():
         try:

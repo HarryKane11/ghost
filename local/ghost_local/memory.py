@@ -79,7 +79,9 @@ def fold(meeting_id: str, cfg: Optional["brain.BrainConfig"] = None, force: bool
 
     new_lines = "\n".join(item.get("text", "") for item in transcript[folded:])
     user_ctx = (meta.get("user_context") or "").strip()
-    ctx_block = f"[회의 배경(사용자 제공) — 고유명사 표기에 참고]\n{user_ctx}\n\n" if user_ctx else ""
+    glossary = store.glossary_text()
+    bg = "\n".join(p for p in [glossary, user_ctx] if p)
+    ctx_block = f"[용어집·회의 배경 — 고유명사 표기에 참고]\n{bg}\n\n" if bg else ""
     user = (
         f"{ctx_block}"
         f"[기존 요약 상태]\n{json.dumps(current, ensure_ascii=False)}\n\n"
@@ -150,7 +152,11 @@ def build_context(meeting_id: str, recent_n: int = RECENT_RAW_N) -> str:
     recent = transcript[-recent_n:] if recent_n > 0 else transcript
     recent_txt = "\n".join(item.get("text", "") for item in recent)
     blocks: List[str] = []
-    # 사용자가 입력한 맥락(상황·주제·고유명사)을 맨 앞에 — 고유명사 표기·요약 정확도↑.
+    # 전역 용어집(Word Memory) — 매 회의에 자동 주입돼 고유명사 표기가 누적 정확해진다.
+    glossary = store.glossary_text()
+    if glossary:
+        blocks.append("## 용어집 (자주 쓰는 고유명사)\n" + glossary)
+    # 사용자가 입력한 회의별 맥락(상황·주제·고유명사).
     user_ctx = (meta.get("user_context") or "").strip()
     if user_ctx:
         blocks.append("## 회의 배경 (사용자 제공)\n" + user_ctx)

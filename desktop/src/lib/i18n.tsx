@@ -128,6 +128,10 @@ const DICT: Record<string, Record<Lang, string>> = {
   "settings.meetingsTitle": { ko: "회의 내역", en: "Meeting history", zh: "会议记录" },
   "settings.meetingsEmpty": { ko: "아직 생성된 회의록이 없습니다.", en: "No minutes yet.", zh: "暂无纪要。" },
   "settings.meetingNoMinutes": { ko: "회의록이 아직 없어요. 요약만 표시합니다.", en: "No minutes yet — showing summary.", zh: "暂无纪要，仅显示摘要。" },
+  "settings.glossaryTitle": { ko: "용어집 (모든 회의 공통)", en: "Glossary (all meetings)", zh: "术语表（所有会议）" },
+  "settings.glossaryDesc": { ko: "자주 쓰는 고유명사·제품명·사람 이름을 등록하면 모든 회의의 전사·요약 정확도가 누적으로 올라가요.", en: "Register frequently-used proper nouns, product or people names — improves transcription & summary accuracy across all meetings.", zh: "登记常用专有名词、产品或人名，可持续提升所有会议的转写与摘要准确度。" },
+  "settings.glossaryTerm": { ko: "용어", en: "Term", zh: "术语" },
+  "settings.glossaryNote": { ko: "설명 (선택)", en: "Note (optional)", zh: "说明（可选）" },
   "settings.open": { ko: "열기", en: "Open", zh: "打开" },
   // 능동성 설정
   "settings.proactiveTitle": { ko: "능동성", en: "Proactivity", zh: "主动性" },

@@ -44,6 +44,9 @@ export function SettingsMenu({
   const [sttModel, setSttModel] = useState<api.SttModel | null>(null);
   const [sttModels, setSttModels] = useState<api.SttModels | null>(null);
   const [customModel, setCustomModel] = useState("");
+  const [glossary, setGlossaryState] = useState<api.GlossaryItem[]>([]);
+  const [gTerm, setGTerm] = useState("");
+  const [gNote, setGNote] = useState("");
 
   const loadConnectors = () => {
     api.getConnectors().then(setConnectors);
@@ -58,8 +61,20 @@ export function SettingsMenu({
     api.getStorage().then((s) => { setStorage(s); setStoragePath(s?.home || ""); });
     api.getSttModel().then(setSttModel);
     api.getSttModels().then(setSttModels);
+    api.getGlossary().then(setGlossaryState);
     setKeySaved(false);
   }, [open]);
+
+  const addTerm = async () => {
+    const term = gTerm.trim();
+    if (!term) return;
+    const next = [...glossary, { term, note: gNote.trim() }];
+    setGlossaryState(await api.setGlossary(next));
+    setGTerm(""); setGNote("");
+  };
+  const removeTerm = async (i: number) => {
+    setGlossaryState(await api.setGlossary(glossary.filter((_, idx) => idx !== i)));
+  };
 
   const pickLocalModel = async (id: string) => {
     await api.selectSttModel("local", id);
@@ -394,6 +409,31 @@ export function SettingsMenu({
               )}
             </div>
           )}
+        </Section>
+
+        {/* 용어집 (Word Memory) — 모든 회의에 자동 주입 */}
+        <Section icon={<KeyRound className="size-4 text-steel" />} title={t("settings.glossaryTitle")}>
+          <p className="mb-2 text-[11px] leading-relaxed text-stone">{t("settings.glossaryDesc")}</p>
+          {glossary.length > 0 && (
+            <div className="mb-2 space-y-1">
+              {glossary.map((g, i) => (
+                <div key={i} className="flex items-center gap-2 rounded-lg border border-hairline px-2.5 py-1.5 text-[12.5px]">
+                  <span className="font-medium text-charcoal">{g.term}</span>
+                  {g.note && <span className="truncate text-stone">— {g.note}</span>}
+                  <button onClick={() => removeTerm(i)} className="ml-auto text-stone hover:text-[#b04141]"><X className="size-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <input value={gTerm} onChange={(e) => setGTerm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTerm()}
+              placeholder={t("settings.glossaryTerm")}
+              className="h-9 w-2/5 min-w-0 rounded-lg border border-hairline bg-surface-soft px-2.5 text-[12.5px] outline-none focus:border-ink/40" />
+            <input value={gNote} onChange={(e) => setGNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTerm()}
+              placeholder={t("settings.glossaryNote")}
+              className="h-9 min-w-0 flex-1 rounded-lg border border-hairline bg-surface-soft px-2.5 text-[12.5px] outline-none focus:border-ink/40" />
+            <button onClick={addTerm} disabled={!gTerm.trim()} className="h-9 shrink-0 rounded-lg bg-ink px-3 text-[12.5px] font-medium text-canvas disabled:opacity-40"><Plus className="size-3.5" /></button>
+          </div>
         </Section>
 
         {/* Meeting history */}

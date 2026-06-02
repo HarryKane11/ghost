@@ -54,6 +54,32 @@ def ghost_home() -> Path:
     return Path.home() / "Ghost"
 
 
+def get_glossary() -> List[dict]:
+    """사용자 전역 용어집 [{term, note}] — 모든 회의에 자동 주입돼 정확도가 누적된다(Tiro Word Memory)."""
+    items = _load_config().get("glossary", [])
+    return [i for i in items if isinstance(i, dict) and i.get("term")]
+
+
+def set_glossary(items: List[dict]) -> List[dict]:
+    """용어집 저장(영속). [{term, note}] 형태로 정규화."""
+    clean: List[dict] = []
+    for i in items or []:
+        if isinstance(i, dict) and str(i.get("term", "")).strip():
+            clean.append({"term": str(i["term"]).strip(), "note": str(i.get("note", "")).strip()})
+    cfg = _load_config()
+    cfg["glossary"] = clean
+    _save_config(cfg)
+    return clean
+
+
+def glossary_text() -> str:
+    """용어집을 프롬프트 주입용 평문으로. 비어 있으면 빈 문자열."""
+    items = get_glossary()
+    if not items:
+        return ""
+    return "\n".join(f"- {i['term']}" + (f": {i['note']}" if i.get("note") else "") for i in items)
+
+
 def set_home(path: str) -> dict:
     """회의록 저장 위치를 사용자 지정으로 변경(영속). 새 경로의 meetings 디렉터리를 만든다.
 
