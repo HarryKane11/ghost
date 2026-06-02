@@ -173,6 +173,7 @@ export default function App() {
   const changeLang = useCallback((l: Lang) => { setLangPref(l); api.setLang(l); }, [setLangPref]);
   const [thinking, setThinking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [backendMenuOpen, setBackendMenuOpen] = useState(false);
   const [onboard, setOnboard] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [demoOn, setDemoOn] = useState(false);
@@ -572,10 +573,28 @@ export default function App() {
       {/* 상단 바 */}
       <header className="relative z-10 flex h-12 shrink-0 items-center gap-3 border-b border-hairline px-3" style={{ ...DRAG, paddingLeft: isMacApp ? 80 : undefined }}>
         <div className="flex items-center gap-2"><GhostLogo variant="icon" size={20} className="rounded-md" /><span className="text-[14px] font-semibold tracking-tight">Ghost</span></div>
-        <div style={NO_DRAG} className="ml-1 flex items-center rounded-full border border-hairline bg-surface-soft p-0.5">
-          {(status?.backends ?? ["codex", "openai"]).map((id) => (
-            <button key={id} onClick={() => chooseBackend(id)} className={cn("inline-flex h-6 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors", status?.backend === id ? "bg-ink text-canvas" : "text-steel hover:text-foreground")}><BrandIcon name={id} size={13} />{BACKEND_LABELS[id] ?? id}</button>
-          ))}
+        <div style={NO_DRAG} className="relative ml-1">
+          <button onClick={() => setBackendMenuOpen((o) => !o)}
+            className="inline-flex h-7 items-center gap-1.5 rounded-full border border-hairline bg-surface-soft px-2.5 text-[12px] font-medium text-foreground hover:bg-surface">
+            <BrandIcon name={status?.backend ?? "codex"} size={13} />
+            {BACKEND_LABELS[status?.backend ?? "codex"] ?? status?.backend}
+            <ChevronDown className={cn("size-3 text-stone transition-transform", backendMenuOpen && "rotate-180")} />
+          </button>
+          {backendMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setBackendMenuOpen(false)} />
+              <div className="absolute left-0 top-9 z-30 min-w-[180px] rounded-xl border border-hairline bg-background p-1 shadow-lg">
+                {(status?.backends ?? ["codex", "openai"]).map((id) => (
+                  <button key={id} onClick={() => { chooseBackend(id); setBackendMenuOpen(false); }}
+                    className={cn("flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px]",
+                      status?.backend === id ? "bg-surface font-medium text-foreground" : "text-steel hover:bg-surface-soft")}>
+                    <BrandIcon name={id} size={14} /> {BACKEND_LABELS[id] ?? id}
+                    {status?.backend === id && <Check className="ml-auto size-3.5 text-spark-deep" />}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
         <button style={NO_DRAG} onClick={refreshStatus} className={cn("inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium",
           backendErr ? "border-[#e9b0b0] bg-[#fdeeee] text-[#b04141]" : codexBad ? "border-[#e9c46a] bg-[#fdf6e3] text-[#9a6a00]" : "border-hairline bg-surface-soft text-steel hover:text-foreground")}>

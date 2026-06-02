@@ -482,14 +482,38 @@ def set_storage(req: StorageReq) -> dict:
 # ── STT 모델 다운로드 (완전 로컬 에디션 첫 실행) ──────────────────────────────
 @app.get("/api/stt/model")
 def stt_model_status() -> dict:
-    """로컬 ASR 모델 보유/다운로드 상태 + 진행률."""
+    """현재 로컬 ASR 모델 보유/다운로드 상태 + 진행률."""
     return stt.download_status()
 
 
 @app.post("/api/stt/model/download")
 def stt_model_download() -> dict:
-    """로컬 ASR 모델 다운로드 시작(백그라운드, 재개 가능)."""
+    """현재 로컬 ASR 모델 다운로드 시작(백그라운드, 재개 가능)."""
     return stt.start_download()
+
+
+@app.get("/api/stt/models")
+def stt_models() -> dict:
+    """선택 가능한 로컬/클라우드 STT 모델 목록 + 현재 활성 모델."""
+    return {
+        "local": stt.LOCAL_MODELS,
+        "local_active": stt.active_model(),
+        "cloud": stt_cloud.CLOUD_MODELS,
+        "cloud_active": stt_cloud.active_model(),
+    }
+
+
+class SttSelectReq(BaseModel):
+    kind: str       # "local" | "cloud"
+    model_id: str
+
+
+@app.post("/api/stt/select")
+def stt_select(req: SttSelectReq) -> dict:
+    """로컬/클라우드 STT 모델 선택. 로컬은 커스텀 HF repo도 허용."""
+    if req.kind == "cloud":
+        return {"ok": True, "kind": "cloud", "model": stt_cloud.set_model(req.model_id)}
+    return {"ok": True, "kind": "local", "model": stt.set_model(req.model_id)}
 
 
 # ── STT ─────────────────────────────────────────────────────────────────────

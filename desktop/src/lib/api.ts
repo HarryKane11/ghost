@@ -232,6 +232,18 @@ export async function getSttModel(): Promise<SttModel | null> {
 export async function downloadSttModel(): Promise<SttModel | null> {
   try { return await (await fetch(`${BASE}/api/stt/model/download`, { method: "POST" })).json(); } catch { return null; }
 }
+
+export type SttModelOption = { id: string; label: string; lang?: string; approx_gb?: number };
+export type SttModels = { local: SttModelOption[]; local_active: string; cloud: SttModelOption[]; cloud_active: string };
+export async function getSttModels(): Promise<SttModels | null> {
+  try { return await (await fetch(`${BASE}/api/stt/models`)).json(); } catch { return null; }
+}
+export async function selectSttModel(kind: "local" | "cloud", modelId: string): Promise<{ ok: boolean; model?: string }> {
+  try {
+    const r = await fetch(`${BASE}/api/stt/select`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, model_id: modelId }) });
+    return await r.json();
+  } catch { return { ok: false }; }
+}
 export function streamMinutesFor(transcript: string, h: StreamHandlers) {
   return streamSSE("/api/minutes/stream", { transcript }, h);
 }

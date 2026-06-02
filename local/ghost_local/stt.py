@@ -10,14 +10,44 @@ from typing import Optional
 
 from mlx_audio.stt.generate import generate_transcription, load_model
 
-# 한국어 지원 Qwen3-ASR (1.7B = 오픈 최대). bf16 = 풀 정밀도로 8bit보다 정확.
-# (M-series 48GB면 ~3.4GB라 부담 없음. 첫 실행 시 1회 다운로드.)
-DEFAULT_STT_MODEL = "mlx-community/Qwen3-ASR-1.7B-bf16"
-# 진행률 표시용 예상 총량(bf16 1.7B ≈ 3.4GB). 정확값은 다운로드 중 갱신될 수 있음.
-_EXPECTED_BYTES = 3_500_000_000
+# 선택 가능한 로컬 ASR 모델 (mlx). HF에서 첫 사용 시 다운로드.
+# lang: ko=한국어 강함, multi=다국어, en=영어 특화. approx_gb=진행률 표시용 근사치.
+LOCAL_MODELS = [
+    {"id": "mlx-community/Qwen3-ASR-1.7B-bf16", "label": "Qwen3-ASR 1.7B · 한국어·다국어 (기본)", "lang": "multi", "approx_gb": 3.4},
+    {"id": "mlx-community/whisper-large-v3-turbo", "label": "Whisper large-v3 turbo · 다국어·빠름", "lang": "multi", "approx_gb": 1.6},
+    {"id": "mlx-community/whisper-large-v3-mlx", "label": "Whisper large-v3 · 최고 정확도·느림", "lang": "multi", "approx_gb": 3.1},
+    {"id": "mlx-community/parakeet-tdt-0.6b-v3", "label": "Parakeet TDT 0.6B · 영어 특화·빠름", "lang": "en", "approx_gb": 2.5},
+    {"id": "mlx-community/whisper-medium-mlx", "label": "Whisper medium · 영어·가벼움", "lang": "multi", "approx_gb": 1.5},
+]
+
+DEFAULT_STT_MODEL = LOCAL_MODELS[0]["id"]
+_DEFAULT_APPROX_GB = 3.4
+
+# 현재 활성 로컬 모델(서버가 /api/stt/select로 바꾼다).
+_active: dict = {"model": DEFAULT_STT_MODEL}
 
 # 모델 다운로드 상태(완전 로컬 에디션 첫 실행 흐름용). 패키징하지 않고 런타임에 받는다.
 _DL: dict = {"state": "idle", "error": None}  # idle | downloading | done | error
+
+
+def active_model() -> str:
+    return _active["model"]
+
+
+def set_model(model_id: str) -> str:
+    """활성 로컬 ASR 모델을 바꾼다(커스텀 HF repo도 허용). 다음 전사부터 적용."""
+    mid = (model_id or "").strip()
+    if mid:
+        _active["model"] = mid
+        _DL.update(state="idle", error=None)  # 새 모델 다운로드 상태 리셋
+    return _active["model"]
+
+
+def _approx_bytes(model_id: str) -> int:
+    for m in LOCAL_MODELS:
+        if m["id"] == model_id:
+            return int(m["approx_gb"] * 1e9)
+    return int(_DEFAULT_APPROX_GB * 1e9)
 
 # MLX의 GPU Stream은 스레드 로컬이다. 모델을 로드한 스레드와 추론을 돌리는 스레드가
 # 다르면 "There is no Stream(gpu, N) in current thread" 런타임 에러가 난다.
@@ -47,9 +77,9 @@ def _transcribe_impl(audio_path: str, model_path: str) -> str:
     return (text or "").strip()
 
 
-def warmup(model_path: str = DEFAULT_STT_MODEL) -> None:
+def warmup(model_path: Optional[str] = None) -> None:
     """모델을 미리 메모리에 올린다(첫 전사 지연 제거). 전용 워커 스레드에서 로드."""
-    _EXECUTOR.submit(_warmup_impl, model_path).result()
+    _EXECUTOR.submit(_warmup_impl, model_path or active_model()).result()
 
 
 def _hf_cache_dir(repo: str) -> Path:
@@ -68,53 +98,57 @@ def _dir_size(p: Path) -> int:
     return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
 
 
-def model_present(model_path: str = DEFAULT_STT_MODEL) -> bool:
+def model_present(model_path: Optional[str] = None) -> bool:
     """모델이 이미 로컬 캐시에 받아져 있는지(네트워크 없이 확인)."""
+    mp = model_path or active_model()
     try:
         from huggingface_hub import snapshot_download
-        snapshot_download(model_path, local_files_only=True)
+        snapshot_download(mp, local_files_only=True)
         return True
     except Exception:  # noqa: BLE001
         return False
 
 
-def download_status(model_path: str = DEFAULT_STT_MODEL) -> dict:
-    """모델 다운로드 상태 + 진행률(완전 로컬 에디션 첫 실행 UI용)."""
-    present = model_present(model_path)
+def download_status(model_path: Optional[str] = None) -> dict:
+    """현재(또는 지정) 로컬 모델 다운로드 상태 + 진행률(완전 로컬 에디션 첫 실행 UI용)."""
+    mp = model_path or active_model()
+    present = model_present(mp)
     state = _DL["state"]
     if present and state != "downloading":
         state = "done"
-    downloaded = _dir_size(_hf_cache_dir(model_path))
+    downloaded = _dir_size(_hf_cache_dir(mp))
+    total = _approx_bytes(mp)
     return {
-        "repo": model_path,
+        "repo": mp,
         "present": present,
         "state": state,
         "downloaded": downloaded,
-        "total": _EXPECTED_BYTES,
-        "percent": min(100, int(downloaded * 100 / _EXPECTED_BYTES)) if not present else 100,
+        "total": total,
+        "percent": 100 if present else min(99, int(downloaded * 100 / total)),
         "error": _DL["error"],
     }
 
 
-def start_download(model_path: str = DEFAULT_STT_MODEL) -> dict:
-    """모델을 백그라운드로 받기 시작한다(재개 가능). 이미 받는 중이면 무시."""
+def start_download(model_path: Optional[str] = None) -> dict:
+    """현재(또는 지정) 모델을 백그라운드로 받기 시작한다(재개 가능). 이미 받는 중이면 무시."""
+    mp = model_path or active_model()
     if _DL["state"] == "downloading":
-        return download_status(model_path)
+        return download_status(mp)
     _DL.update(state="downloading", error=None)
 
     def _w():
         try:
             from huggingface_hub import snapshot_download
-            snapshot_download(model_path)  # 재개 지원, HF 캐시에 저장
+            snapshot_download(mp)  # 재개 지원, HF 캐시에 저장
             _DL["state"] = "done"
         except Exception as ex:  # noqa: BLE001
             _DL.update(state="error", error=str(ex))
 
     threading.Thread(target=_w, daemon=True).start()
-    return download_status(model_path)
+    return download_status(mp)
 
 
-def transcribe(audio_path: str, model_path: str = DEFAULT_STT_MODEL) -> str:
+def transcribe(audio_path: str, model_path: Optional[str] = None) -> str:
     """오디오 파일을 한국어 전사 텍스트로 변환한다.
 
     MLX 추론은 모델을 로드한 것과 동일한 전용 워커 스레드에서 수행한다
@@ -127,4 +161,4 @@ def transcribe(audio_path: str, model_path: str = DEFAULT_STT_MODEL) -> str:
     Returns:
         전사된 텍스트.
     """
-    return _EXECUTOR.submit(_transcribe_impl, audio_path, model_path).result()
+    return _EXECUTOR.submit(_transcribe_impl, audio_path, model_path or active_model()).result()

@@ -42,6 +42,8 @@ export function SettingsMenu({
   const [storage, setStorage] = useState<api.Storage | null>(null);
   const [storagePath, setStoragePath] = useState("");
   const [sttModel, setSttModel] = useState<api.SttModel | null>(null);
+  const [sttModels, setSttModels] = useState<api.SttModels | null>(null);
+  const [customModel, setCustomModel] = useState("");
 
   const loadConnectors = () => {
     api.getConnectors().then(setConnectors);
@@ -55,8 +57,19 @@ export function SettingsMenu({
     api.getMeetings().then(setMeetings);
     api.getStorage().then((s) => { setStorage(s); setStoragePath(s?.home || ""); });
     api.getSttModel().then(setSttModel);
+    api.getSttModels().then(setSttModels);
     setKeySaved(false);
   }, [open]);
+
+  const pickLocalModel = async (id: string) => {
+    await api.selectSttModel("local", id);
+    setSttModels(await api.getSttModels());
+    setSttModel(await api.getSttModel());
+  };
+  const pickCloudModel = async (id: string) => {
+    await api.selectSttModel("cloud", id);
+    setSttModels(await api.getSttModels());
+  };
 
   // 모델 다운로드 중이면 진행률 폴링.
   useEffect(() => {
@@ -206,8 +219,39 @@ export function SettingsMenu({
           <p className="mt-1.5 text-[11.5px] leading-relaxed text-stone">
             {status?.stt_provider === "elevenlabs" ? t("settings.sttCloudDesc") : t("settings.sttLocalDesc")}
           </p>
+
+          {/* 로컬 모델 선택 (영어권 포함 여러 HF 모델 + 커스텀) */}
+          {status?.stt_provider !== "elevenlabs" && sttModels && (
+            <div className="mt-2.5">
+              <div className="mb-1 text-[11px] text-stone">{t("settings.sttModel")}</div>
+              <select value={sttModels.local.some((m) => m.id === sttModels.local_active) ? sttModels.local_active : "__custom__"}
+                onChange={(e) => { if (e.target.value !== "__custom__") pickLocalModel(e.target.value); }}
+                className="h-9 w-full rounded-lg border border-hairline bg-surface-soft px-2 text-[12.5px] text-charcoal outline-none focus:border-ink/40">
+                {sttModels.local.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                <option value="__custom__">{t("settings.sttCustom")}</option>
+              </select>
+              <div className="mt-2 flex items-center gap-2">
+                <input value={customModel} onChange={(e) => setCustomModel(e.target.value)}
+                  placeholder="huggingface repo (예: mlx-community/...)"
+                  className="h-9 min-w-0 flex-1 rounded-lg border border-hairline bg-surface-soft px-2.5 text-[12px] text-charcoal outline-none focus:border-ink/40" />
+                <button onClick={() => customModel.trim() && pickLocalModel(customModel.trim())} disabled={!customModel.trim()}
+                  className="h-9 shrink-0 rounded-lg border border-hairline px-3 text-[12.5px] text-steel hover:text-foreground disabled:opacity-40">{t("settings.sttUseCustom")}</button>
+              </div>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-stone">{t("settings.sttModelDesc")}</p>
+            </div>
+          )}
+
           {status?.stt_provider === "elevenlabs" && (
             <div className="mt-2.5">
+              {sttModels && (
+                <div className="mb-2.5">
+                  <div className="mb-1 text-[11px] text-stone">{t("settings.sttModel")}</div>
+                  <select value={sttModels.cloud_active} onChange={(e) => pickCloudModel(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-hairline bg-surface-soft px-2 text-[12.5px] text-charcoal outline-none focus:border-ink/40">
+                    {sttModels.cloud.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="mb-1 text-[11px] text-stone">{t("settings.elevenKey")}</div>
               <div className="flex items-center gap-2">
                 <input type="password" value={elevenKey} onChange={(e) => setElevenKeyVal(e.target.value)}
