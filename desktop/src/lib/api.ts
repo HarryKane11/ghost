@@ -30,8 +30,10 @@ export type Route = {
 export type MeetingMeta = {
   id: string;
   title: string;
+  folder?: string;
   started_at?: string;
   ended_at?: string | null;
+  duration_sec?: number | null;
   utterance_count?: number;
   has_minutes?: boolean;
 };
@@ -75,6 +77,12 @@ export async function endMeeting(meetingId: string): Promise<void> {
 export async function setMeetingTitle(meetingId: string, title: string): Promise<MeetingMeta | null> {
   try {
     const r = await fetch(`${BASE}/api/meetings/${meetingId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) });
+    return (await r.json()).meeting ?? null;
+  } catch { return null; }
+}
+export async function setMeetingFolder(meetingId: string, folder: string): Promise<MeetingMeta | null> {
+  try {
+    const r = await fetch(`${BASE}/api/meetings/${meetingId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folder }) });
     return (await r.json()).meeting ?? null;
   } catch { return null; }
 }

@@ -441,19 +441,31 @@ export function SettingsMenu({
           {meetings.length === 0 ? (
             <div className="text-[12.5px] text-stone">{t("settings.meetingsEmpty")}</div>
           ) : (
-            <div className="space-y-1">
-              {meetings.map((m) => (
-                <button key={m.id} onClick={async () => {
+            <div className="space-y-3">
+              {(() => {
+                const fmtDur = (s?: number | null) => (s == null ? "" : s < 60 ? `${s}s` : `${Math.floor(s / 60)}m`);
+                const groups: Record<string, api.MeetingMeta[]> = {};
+                for (const m of meetings) (groups[m.folder || ""] ||= []).push(m);
+                const folders = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
+                const openMeeting = async (m: api.MeetingMeta) => {
                   const full = await api.getMeeting(m.id);
                   const spec = full?.minutes || { title: m.title, spoken: "", intent: "note",
                     blocks: [{ type: "text", text: full?.summary || t("settings.meetingNoMinutes") }] };
                   onOpenMeeting(m.title, spec as Spec); onClose();
-                }}
-                  className="flex w-full items-center justify-between gap-2 rounded-lg border border-hairline px-3 py-2 text-left text-[13px] hover:bg-surface-soft">
-                  <span className="truncate">{m.title}</span>
-                  <span className="shrink-0 text-[11px] text-stone">{m.has_minutes ? t("settings.open") : `${m.utterance_count ?? 0}·${t("settings.open")}`}</span>
-                </button>
-              ))}
+                };
+                return folders.map((f) => (
+                  <div key={f || "__none__"} className="space-y-1">
+                    <div className="px-1 text-[11px] font-medium text-stone">{f || t("settings.folderNone")}</div>
+                    {groups[f].map((m) => (
+                      <button key={m.id} onClick={() => openMeeting(m)}
+                        className="flex w-full items-center justify-between gap-2 rounded-lg border border-hairline px-3 py-2 text-left text-[13px] hover:bg-surface-soft">
+                        <span className="truncate">{m.title}</span>
+                        <span className="shrink-0 text-[11px] text-stone">{fmtDur(m.duration_sec) && `${fmtDur(m.duration_sec)} · `}{m.has_minutes ? t("settings.open") : `${m.utterance_count ?? 0}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                ));
+              })()}
             </div>
           )}
         </Section>

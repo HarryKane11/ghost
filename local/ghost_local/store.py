@@ -156,6 +156,7 @@ def create_meeting(backend: str = "", lang: str = "ko") -> dict:
             "title": _default_title(started_at),
             "title_custom": False,  # 사용자가 직접 수정했는지 (자동 제목 갱신 억제용)
             "user_context": "",     # 사용자가 입력한 회의 맥락(상황·주제·고유명사) — 정확도↑
+            "folder": "",           # 회의 분류 폴더(사용자 지정)
             "started_at": started_at,
             "ended_at": None,
             "backend": backend,
@@ -186,6 +187,22 @@ def update_meta(meeting_id: str, patch: Dict[str, Any]) -> Optional[dict]:
         meta.update(patch)
         _write_json(folder / "meeting.json", meta)
         return meta
+
+
+def set_folder(meeting_id: str, folder: str) -> Optional[dict]:
+    """회의를 폴더로 분류(사용자 지정). 폴더명 비우면 미분류."""
+    return update_meta(meeting_id, {"folder": (folder or "").strip()})
+
+
+def _duration_sec(meta: dict) -> Optional[int]:
+    """started_at~ended_at 회의 길이(초). 종료 안 됐으면 None."""
+    s, e = meta.get("started_at"), meta.get("ended_at")
+    if not s or not e:
+        return None
+    try:
+        return max(0, int((datetime.fromisoformat(e) - datetime.fromisoformat(s)).total_seconds()))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def set_context(meeting_id: str, text: str) -> Optional[dict]:
@@ -310,8 +327,10 @@ def list_meetings(limit: int = 50) -> List[dict]:
         out.append({
             "id": meta.get("id", folder.name),
             "title": meta.get("title", folder.name),
+            "folder": meta.get("folder", ""),
             "started_at": meta.get("started_at"),
             "ended_at": meta.get("ended_at"),
+            "duration_sec": _duration_sec(meta),
             "utterance_count": meta.get("utterance_count", 0),
             "has_minutes": (folder / "minutes.json").exists(),
         })

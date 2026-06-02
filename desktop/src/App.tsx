@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, SlidersHorizontal, AudioLines, Square,
-  HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Ghost,
+  HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Ghost, Copy,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -204,6 +204,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   // 회의 (일시 폴더 저장 + 서버 롤링 메모리)
   const [meetingTitle, setMeetingTitle] = useState<string>("");
+  const [meetingFolder, setMeetingFolder] = useState<string>("");
   const meetingIdRef = useRef<string>("");
   // 능동성 설정: 다이제스트 주기(분), 실시간 개입 민감도, 다이제스트 자동조사
   const [digestMin, setDigestMin] = usePref<number>("ghost.digestMin", 5);
@@ -444,7 +445,7 @@ export default function App() {
       }
       // 새 회의 시작 → 일시 폴더 생성. 전사·요약·회의록이 여기 누적된다.
       liveCardRef.current = 0; digestTextRef.current = "";
-      try { const m = await api.startMeeting(); meetingIdRef.current = m.id; setMeetingTitle(m.title); }
+      try { const m = await api.startMeeting(); meetingIdRef.current = m.id; setMeetingTitle(m.title); setMeetingFolder(m.folder || ""); }
       catch { meetingIdRef.current = ""; }
       setActive(true); await start(onUtterance, source, source === "mic" ? micId || undefined : undefined);
     }
@@ -546,6 +547,18 @@ export default function App() {
     const mid = meetingIdRef.current;
     if (mid && v) api.setMeetingTitle(mid, v);
   }, []);
+  // 회의 폴더 분류 편집 (Tiro '폴더에 추가하기').
+  const commitFolder = useCallback((folder: string) => {
+    setMeetingFolder(folder);
+    const mid = meetingIdRef.current;
+    if (mid) api.setMeetingFolder(mid, folder.trim());
+  }, []);
+  // 전사 클립보드 복사.
+  const copyTranscript = useCallback(async () => {
+    const txt = transcriptRef.current.join("\n");
+    if (!txt) { flash(t("toast.exportEmpty")); return; }
+    try { await navigator.clipboard.writeText(txt); flash(t("toast.copied")); } catch { flash(t("toast.exportFail")); }
+  }, [t]);
 
   const togglePin = useCallback((id: string) => {
     setFeed((f) => f.map((x) => (x.kind === "card" && x.id === id ? { ...x, pinned: !x.pinned } : x)));
@@ -667,6 +680,7 @@ export default function App() {
             <div className="ml-auto flex items-center gap-1">
               <button onClick={openContext} title={t("trans.context")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><FileText className="size-3.5" /></button>
               <button onClick={() => { setSearchOpen((v) => !v); if (searchOpen) setTq(""); }} title={t("trans.search")} className={cn("grid size-6 place-items-center rounded-md hover:bg-surface hover:text-foreground", searchOpen ? "text-foreground" : "text-stone")}><Search className="size-3.5" /></button>
+              <button onClick={copyTranscript} title={t("trans.copy")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><Copy className="size-3.5" /></button>
               <button onClick={exportMd} title={t("trans.export")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><Download className="size-3.5" /></button>
               <button onClick={clearSession} disabled={active} title={t("trans.clear")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground disabled:opacity-40"><Trash2 className="size-3.5" /></button>
               <div className="ml-1 flex items-center rounded-full border border-hairline bg-surface-soft p-0.5">
@@ -679,14 +693,23 @@ export default function App() {
             </div>
           </div>
           {meetingTitle && (
-            <div className="flex items-center gap-2 px-4 pb-2" title={t("trans.titleEdit")}>
+            <div className="flex items-center gap-1.5 px-4 pb-2">
               <input
                 value={meetingTitle}
                 onChange={(e) => setMeetingTitle(e.target.value)}
                 onBlur={(e) => commitTitle(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                placeholder={t("trans.titlePlaceholder")}
+                placeholder={t("trans.titlePlaceholder")} title={t("trans.titleEdit")}
                 className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[13px] font-medium text-foreground outline-none hover:border-hairline focus:border-ink/40 focus:bg-surface-soft"
+              />
+              <span className="shrink-0 text-stone">/</span>
+              <input
+                value={meetingFolder}
+                onChange={(e) => setMeetingFolder(e.target.value)}
+                onBlur={(e) => commitFolder(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                placeholder={t("trans.folder")} title={t("trans.folder")}
+                className="w-28 shrink-0 truncate rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12px] text-steel outline-none hover:border-hairline focus:border-ink/40 focus:bg-surface-soft"
               />
             </div>
           )}

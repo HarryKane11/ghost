@@ -25,6 +25,8 @@ const DICT: Record<string, Record<Lang, string>> = {
   "trans.title": { ko: "실시간 전사", en: "Live transcript", zh: "实时转写" },
   "trans.titleEdit": { ko: "회의 제목 (클릭해 편집)", en: "Meeting title (click to edit)", zh: "会议标题（点击编辑）" },
   "trans.context": { ko: "맥락 입력 (정확도↑)", en: "Add context (improves accuracy)", zh: "添加背景（提升准确度）" },
+  "trans.copy": { ko: "전사 복사", en: "Copy transcript", zh: "复制转写" },
+  "trans.folder": { ko: "폴더", en: "Folder", zh: "文件夹" },
   // Ask 패널 추천 프롬프트
   "ask.summary": { ko: "주요 내용 요약", en: "Summarize key points", zh: "总结要点" },
   "ask.actions": { ko: "할 일 정리", en: "List action items", zh: "整理待办" },
@@ -91,6 +93,7 @@ const DICT: Record<string, Record<Lang, string>> = {
   "toast.sttFail": { ko: "전사 실패 — 백엔드 STT 상태를 확인하세요", en: "Transcription failed — check the STT backend", zh: "转写失败 — 请检查 STT 后端" },
   "toast.minutesShort": { ko: "회의록을 만들 전사 내용이 부족해요", en: "Not enough transcript to make minutes", zh: "转写内容不足，无法生成纪要" },
   "toast.busy": { ko: "앞 작업을 끝내는 중이에요", en: "Finishing the previous task…", zh: "正在完成上一个任务…" },
+  "toast.copied": { ko: "전사를 복사했어요", en: "Transcript copied", zh: "已复制转写" },
   "toast.ctxSaved": { ko: "회의 맥락을 저장했어요", en: "Context saved", zh: "已保存会议背景" },
   "toast.ctxNoMeeting": { ko: "먼저 청취를 시작하면 맥락을 저장할 수 있어요", en: "Start listening first to save context", zh: "请先开始聆听再保存背景" },
   "toast.backendFail": { ko: "백엔드 변경 실패", en: "Failed to switch backend", zh: "切换后端失败" },
@@ -139,6 +142,7 @@ const DICT: Record<string, Record<Lang, string>> = {
   "settings.glossaryTerm": { ko: "용어", en: "Term", zh: "术语" },
   "settings.glossaryNote": { ko: "설명 (선택)", en: "Note (optional)", zh: "说明（可选）" },
   "settings.open": { ko: "열기", en: "Open", zh: "打开" },
+  "settings.folderNone": { ko: "미분류", en: "Ungrouped", zh: "未分类" },
   // 능동성 설정
   "settings.proactiveTitle": { ko: "능동성", en: "Proactivity", zh: "主动性" },
   "settings.digestEvery": { ko: "다이제스트 주기", en: "Digest interval", zh: "摘要间隔" },

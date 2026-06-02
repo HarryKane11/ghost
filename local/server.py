@@ -439,14 +439,21 @@ def get_meeting_ep(meeting_id: str) -> dict:
     return {"ok": True, "meeting": m}
 
 
-class TitleReq(BaseModel):
-    title: str
+class MeetingEditReq(BaseModel):
+    title: Optional[str] = None
+    folder: Optional[str] = None
 
 
 @app.patch("/api/meetings/{meeting_id}")
-def edit_meeting(meeting_id: str, req: TitleReq) -> dict:
-    """회의 제목 편집(폴더명 불변)."""
-    meta = store.set_title(meeting_id, req.title)
+def edit_meeting(meeting_id: str, req: MeetingEditReq) -> dict:
+    """회의 제목/폴더 편집(폴더명=ID 불변, title·folder 필드만)."""
+    meta = None
+    if req.title is not None:
+        meta = store.set_title(meeting_id, req.title)
+    if req.folder is not None:
+        meta = store.set_folder(meeting_id, req.folder)
+    if meta is None:
+        meta = store.get_meta(meeting_id)
     if meta is None:
         return {"ok": False, "error": "not found"}
     return {"ok": True, "meeting": meta}
