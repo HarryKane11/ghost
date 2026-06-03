@@ -72,6 +72,38 @@ def set_glossary(items: List[dict]) -> List[dict]:
     return clean
 
 
+def get_connector_index() -> dict:
+    """커넥터별 사전 인덱스 {name: {indexed_at, summary}} — codex가 미팅 중 어디서 정보를 찾을지 안다."""
+    idx = _load_config().get("connector_index", {})
+    return idx if isinstance(idx, dict) else {}
+
+
+def set_connector_index(name: str, summary: str) -> dict:
+    """커넥터 지형 요약(채널·페이지 목록·역할)을 저장. 모든 회의 컨텍스트에 주입된다."""
+    cfg = _load_config()
+    idx = cfg.get("connector_index", {})
+    if not isinstance(idx, dict):
+        idx = {}
+    idx[name] = {"indexed_at": _now_iso(), "summary": (summary or "").strip()}
+    cfg["connector_index"] = idx
+    _save_config(cfg)
+    return idx[name]
+
+
+def connector_index_text(limit_chars: int = 2400) -> str:
+    """인덱싱된 커넥터 지형을 컨텍스트 주입용 평문으로(길이 제한)."""
+    idx = get_connector_index()
+    if not idx:
+        return ""
+    parts = []
+    for name, rec in idx.items():
+        s = (rec or {}).get("summary", "").strip()
+        if s:
+            parts.append(f"### {name}\n{s}")
+    text = "\n\n".join(parts)
+    return text[:limit_chars]
+
+
 def glossary_text() -> str:
     """용어집을 프롬프트 주입용 평문으로. 비어 있으면 빈 문자열."""
     items = get_glossary()

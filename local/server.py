@@ -365,6 +365,27 @@ def connector_remove(req: NameReq) -> dict:
         return {"ok": False, "error": str(ex)}
 
 
+@app.get("/api/connectors/index")
+def get_connector_index_ep() -> dict:
+    """커넥터별 사전 인덱스(지형) — 인덱싱 시각 포함."""
+    return {"index": store.get_connector_index()}
+
+
+@app.post("/api/connectors/index")
+def index_connector_ep(req: NameReq) -> dict:
+    """codex가 해당 커넥터를 열거해 지형 인덱스를 만들고 저장 → 모든 회의 컨텍스트에 주입."""
+    name = (req.name or "").strip()
+    if not name:
+        return {"ok": False, "error": "name required"}
+    if STATE["backend"] != "codex":
+        return {"ok": False, "error": "codex_only", "message": "커넥터 인덱싱은 codex 백엔드에서만 됩니다."}
+    summary = brain.index_connector(name, _cfg())
+    if not summary:
+        return {"ok": False, "error": "no_result", "message": "인덱싱 결과가 비었어요(커넥터 연결/권한 확인)."}
+    rec = store.set_connector_index(name, summary)
+    return {"ok": True, "name": name, "record": rec}
+
+
 @app.get("/api/tools")
 def tools() -> dict:
     """Codex 백엔드가 쓸 수 있는 도구."""

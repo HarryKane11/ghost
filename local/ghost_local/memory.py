@@ -152,6 +152,10 @@ def build_context(meeting_id: str, recent_n: int = RECENT_RAW_N) -> str:
     recent = transcript[-recent_n:] if recent_n > 0 else transcript
     recent_txt = "\n".join(item.get("text", "") for item in recent)
     blocks: List[str] = []
+    # 커넥터 사전 인덱스 — codex가 미팅 중 '어디서' 정보를 찾을지 미리 알게 한다(채널·페이지 지형).
+    conn_idx = store.connector_index_text()
+    if conn_idx:
+        blocks.append("## 연결된 도구 지형 (어디서 찾을지)\n" + conn_idx)
     # 전역 용어집(Word Memory) — 매 회의에 자동 주입돼 고유명사 표기가 누적 정확해진다.
     glossary = store.glossary_text()
     if glossary:

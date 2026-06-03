@@ -384,6 +384,40 @@ def judge(utterance: str, context: str = "", cfg: Optional["BrainConfig"] = None
     }
 
 
+def index_connector(name: str, cfg: Optional["BrainConfig"] = None, timeout: int = 240) -> str:
+    """codex가 해당 커넥터(MCP)로 지형을 열거하게 한다: 채널/페이지/스페이스 목록과 각 역할.
+
+    결과 요약 텍스트를 반환(store에 저장 → 모든 회의 컨텍스트에 주입). codex 백엔드 전용.
+    """
+    cfg = cfg or BrainConfig()
+    if cfg.backend != "codex":
+        return ""
+    with tempfile.NamedTemporaryFile("r", suffix=".txt", delete=False) as f:
+        out_path = Path(f.name)
+    prompt = (
+        f"'{name}' 커넥터(연결된 MCP 도구)를 사용해, 이 워크스페이스의 지형을 한 번 조사해 정리해줘.\n"
+        "- 주요 채널/페이지/스페이스/문서의 '목록'과 각각이 '무슨 용도'인지 한 줄씩.\n"
+        "- 회의 중 정보를 어디서 찾으면 되는지 빠르게 파악할 수 있는 인덱스가 목적이야.\n"
+        "- 너무 길지 않게 핵심만(최대 30줄). 실제 도구로 조회해서 사실만. 한국어 불릿으로."
+    )
+    cmd = [
+        "codex", "exec", "--skip-git-repo-check",
+        "-c", f'model_reasoning_effort="{cfg.reasoning_effort}"',
+        "--output-last-message", str(out_path),
+    ]
+    if cfg.codex_model:
+        cmd += ["-m", cfg.codex_model]
+    cmd.append(prompt)
+    try:
+        subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+        raw = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
+    except Exception:  # noqa: BLE001
+        raw = ""
+    finally:
+        out_path.unlink(missing_ok=True)
+    return raw.strip()
+
+
 def translate(text: str, target_name: str, cfg: Optional["BrainConfig"] = None) -> str:
     """한 문장을 target 언어로 번역(인터뷰 모드용). 설정된 백엔드의 경량 텍스트 경로 사용."""
     text = (text or "").strip()

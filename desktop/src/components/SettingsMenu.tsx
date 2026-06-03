@@ -4,6 +4,7 @@ import * as api from "@/lib/api";
 import type { Spec } from "@/components/GenUI";
 import { BrandIcon, hasBrand, EntityIcon, hasEntityIcon } from "@/components/BrandIcon";
 import { useT, LANGS } from "@/lib/i18n";
+import { cn } from "@/lib/cn";
 import { Languages } from "lucide-react";
 
 // TODO: 실제 저장소 URL로 교체하세요.
@@ -45,6 +46,8 @@ export function SettingsMenu({
   const [sttModels, setSttModels] = useState<api.SttModels | null>(null);
   const [customModel, setCustomModel] = useState("");
   const [glossary, setGlossaryState] = useState<api.GlossaryItem[]>([]);
+  const [connIndex, setConnIndex] = useState<api.ConnectorIndex>({});
+  const [indexing, setIndexing] = useState<string | null>(null);
   const [gTerm, setGTerm] = useState("");
   const [gNote, setGNote] = useState("");
 
@@ -52,6 +55,14 @@ export function SettingsMenu({
     api.getConnectors().then(setConnectors);
     api.getTools().then(setTools);
     api.getConnectorRegistry().then((r) => setRegistry(r.connectors));
+    api.getConnectorIndex().then(setConnIndex);
+  };
+  const doIndex = async (name: string) => {
+    setIndexing(name);
+    const r = await api.indexConnector(name);
+    setIndexing(null);
+    if (r.ok) setConnIndex(await api.getConnectorIndex());
+    else alert(r.message || r.error || "인덱싱 실패");
   };
 
   useEffect(() => {
@@ -324,6 +335,14 @@ export function SettingsMenu({
                   ? <span className="grid size-5 shrink-0 place-items-center"><BrandIcon name={c.name} size={20} /></span>
                   : <span className={`size-1.5 shrink-0 rounded-full ${c.connected ? "bg-spark" : "bg-stone"}`} />}
                 <span className="flex-1 truncate text-[12.5px] font-medium text-charcoal">{c.label}</span>
+                {c.connected && (
+                  indexing === c.name
+                    ? <span className="inline-flex items-center gap-1 text-[11px] text-stone"><Loader2 className="size-3.5 animate-spin" /> {t("settings.indexing")}</span>
+                    : <button onClick={() => doIndex(c.name)} title={connIndex[c.name] ? `${t("settings.indexed")} · ${connIndex[c.name].indexed_at?.slice(0, 10)}` : t("settings.indexHint")}
+                        className={cn("rounded-md border border-hairline px-2 py-1 text-[11px]", connIndex[c.name] ? "text-spark-deep" : "text-steel hover:text-foreground")}>
+                        {connIndex[c.name] ? `✓ ${t("settings.indexBtn")}` : t("settings.indexBtn")}
+                      </button>
+                )}
                 {busy === c.name ? (
                   <Loader2 className="size-4 animate-spin text-stone" />
                 ) : c.connected ? (

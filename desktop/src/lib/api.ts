@@ -190,6 +190,16 @@ export async function connectConnector(name: string, url = ""): Promise<{ ok: bo
     return await r.json();
   } catch (e) { return { ok: false, error: String(e) }; }
 }
+export type ConnectorIndex = Record<string, { indexed_at: string; summary: string }>;
+export async function getConnectorIndex(): Promise<ConnectorIndex> {
+  try { return (await (await fetch(`${BASE}/api/connectors/index`)).json()).index || {}; } catch { return {}; }
+}
+export async function indexConnector(name: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+  try {
+    const r = await fetch(`${BASE}/api/connectors/index`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    return await r.json();
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
 export async function removeConnector(name: string): Promise<{ ok: boolean }> {
   try {
     const r = await fetch(`${BASE}/api/connectors/remove`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
