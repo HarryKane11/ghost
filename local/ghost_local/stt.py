@@ -8,7 +8,10 @@ mlx 엔진이 기본(Apple Silicon 네이티브)이고, 나머지는 사용자�
 from __future__ import annotations
 
 import concurrent.futures
+import importlib
 import importlib.util
+import subprocess
+import sys
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -68,6 +71,53 @@ def engine_available(engine: str) -> bool:
 def models_with_status() -> list:
     """UI용 모델 목록 + 엔진 설치 여부."""
     return [{**m, "engine_ready": engine_available(m.get("engine", "mlx"))} for m in LOCAL_MODELS]
+
+
+# ── 인앱 설치 — 터미널 없이 앱에서 옵셔널 엔진(로컬 STT·스트리밍·TTS 등)을 설치 ──
+# 백엔드 venv에 `uv pip install`(없으면 python -m pip)로 설치. 설치 후 importlib 캐시 무효화 → 즉시 사용.
+INSTALL_PKGS = {
+    "local": ["mlx-audio>=0.4.3", "mlx-whisper>=0.4.3", "soundfile>=0.13.1", "parakeet-mlx>=0.5.1"],  # 배치+스트리밍
+    "faster-whisper": ["faster-whisper>=1.0"],
+    "whisperx": ["whisperx>=3.1"],
+    "granite": ["transformers>=4.52", "torchaudio", "peft"],
+    "tts": ["supertonic>=1.3.1"],
+}
+_INSTALL: dict = {"state": "idle", "target": None, "error": None}  # idle|installing|done|error
+
+
+def install_target_for(model_id: str) -> str:
+    """모델을 쓰려면 설치해야 할 타깃(extra 이름). mlx 계열은 'local'(배치+스트리밍 한 번에)."""
+    return {"faster-whisper": "faster-whisper", "whisperx": "whisperx", "granite": "granite"}.get(_engine(model_id), "local")
+
+
+def engine_install_status() -> dict:
+    return dict(_INSTALL)
+
+
+def install_engine(target: str) -> dict:
+    """옵셔널 엔진 패키지를 백엔드 venv에 설치(백그라운드). 진행 상태는 engine_install_status."""
+    pkgs = INSTALL_PKGS.get(target)
+    if not pkgs:
+        return {"ok": False, "error": f"unknown target: {target}"}
+    if _INSTALL["state"] == "installing":
+        return dict(_INSTALL)
+    _INSTALL.update(state="installing", target=target, error=None)
+
+    def _w():
+        try:
+            r = subprocess.run(["uv", "pip", "install", *pkgs], capture_output=True, text=True, timeout=2400)
+            if r.returncode != 0:
+                r = subprocess.run([sys.executable, "-m", "pip", "install", *pkgs], capture_output=True, text=True, timeout=2400)
+            if r.returncode != 0:
+                _INSTALL.update(state="error", error=(r.stderr or "설치 실패")[-400:])
+                return
+            importlib.invalidate_caches()   # 새로 깐 패키지를 find_spec/import가 인식
+            _INSTALL.update(state="done", error=None)
+        except Exception as ex:  # noqa: BLE001
+            _INSTALL.update(state="error", error=str(ex))
+
+    threading.Thread(target=_w, daemon=True).start()
+    return dict(_INSTALL)
 
 # 현재 활성 로컬 모델(서버가 /api/stt/select로 바꾼다).
 _active: dict = {"model": DEFAULT_STT_MODEL}

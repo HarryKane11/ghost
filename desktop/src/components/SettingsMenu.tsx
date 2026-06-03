@@ -45,6 +45,7 @@ export function SettingsMenu({
   const [sttModel, setSttModel] = useState<api.SttModel | null>(null);
   const [sttModels, setSttModels] = useState<api.SttModels | null>(null);
   const [sttStreaming, setSttStreaming] = useState<{ available: boolean } | null>(null);
+  const [engineInstall, setEngineInstall] = useState<api.EngineInstall>({ state: "idle" });
   const [customModel, setCustomModel] = useState("");
   const [glossary, setGlossaryState] = useState<api.GlossaryItem[]>([]);
   const [connIndex, setConnIndex] = useState<api.ConnectorIndex>({});
@@ -74,6 +75,7 @@ export function SettingsMenu({
     api.getSttModel().then(setSttModel);
     api.getSttModels().then(setSttModels);
     api.getSttStreaming().then(setSttStreaming);
+    api.getEngineInstall().then(setEngineInstall);
     api.getGlossary().then(setGlossaryState);
     setKeySaved(false);
   }, [open]);
@@ -99,6 +101,26 @@ export function SettingsMenu({
     await api.selectSttModel("cloud", id);
     setSttModels(await api.getSttModels());
   };
+
+  const refreshSttState = async () => {
+    setSttModels(await api.getSttModels());
+    setSttModel(await api.getSttModel());
+    setSttStreaming(await api.getSttStreaming());
+    if (onStatus) onStatus(await api.getStatus());   // tts 설치 반영
+  };
+  const doInstall = async (target: string) => {
+    setEngineInstall(await api.installEngine(target));
+  };
+  // 설치 중이면 진행 폴링 → 완료 시 상태 새로고침.
+  useEffect(() => {
+    if (!open || engineInstall.state !== "installing") return;
+    const id = setInterval(async () => {
+      const s = await api.getEngineInstall();
+      setEngineInstall(s);
+      if (s.state === "done" || s.state === "error") { clearInterval(id); if (s.state === "done") refreshSttState(); }
+    }, 2500);
+    return () => clearInterval(id);
+  }, [open, engineInstall.state]);
 
   // 모델 다운로드 중이면 진행률 폴링.
   useEffect(() => {
@@ -314,14 +336,21 @@ export function SettingsMenu({
                     <span className="rounded-full bg-surface px-2 py-0.5 text-[10.5px] text-steel">{m.engine}</span>
                     {m.streaming && <span className="rounded-full bg-spark-soft px-2 py-0.5 text-[10.5px] text-spark-deep">⚡ {t("settings.sttStreaming")}</span>}
                     {m.diarization && <span className="rounded-full bg-spark-soft px-2 py-0.5 text-[10.5px] text-spark-deep">👥 {t("settings.sttDiarization")}</span>}
-                    {m.engine_ready === false && m.install && (
-                      <span className="w-full text-[11px] text-[#b06a00]">{t("settings.sttNeedInstall")} <code className="rounded bg-surface px-1 font-mono">{m.install}</code></span>
+                    {/* 엔진 미설치 → 앱에서 바로 설치 (터미널 불필요) */}
+                    {m.engine_ready === false && (
+                      <span className="flex w-full items-center gap-1.5 text-[11px] text-[#b06a00]">
+                        {t("settings.sttNeedInstall")}
+                        <InstallBtn target={m.engine === "mlx" ? "local" : (m.engine || "local")} state={engineInstall} onInstall={doInstall} t={t} />
+                      </span>
                     )}
-                    {/* 스트리밍 모델: 실제 활성 여부 + 활성화 안내 */}
-                    {m.streaming && (
+                    {/* 스트리밍 모델: 활성 여부 + 비활성 시 앱에서 설치 */}
+                    {m.streaming && m.engine_ready !== false && (
                       sttStreaming?.available
                         ? <span className="w-full text-[11px] text-spark-deep">⚡ {t("settings.streamActive")}</span>
-                        : <span className="w-full text-[11px] text-[#b06a00]">{t("settings.streamInactive")} <code className="rounded bg-surface px-1 font-mono">uv sync --extra local</code> {t("settings.streamInactive2")}</span>
+                        : <span className="flex w-full items-center gap-1.5 text-[11px] text-[#b06a00]">
+                            {t("settings.streamInactive2b")}
+                            <InstallBtn target="local" state={engineInstall} onInstall={doInstall} t={t} />
+                          </span>
                     )}
                   </div>
                 );
@@ -381,7 +410,9 @@ export function SettingsMenu({
             <span className="ml-auto text-[11px] text-stone">{(status?.tts?.voices || []).length} {t("settings.ttsVoices")}</span>
           </div>
           {status?.tts && !status.tts.available && (
-            <p className="mt-1.5 text-[11px] text-[#b06a00]">{t("settings.ttsNeedInstall")} <code className="rounded bg-surface px-1 font-mono">{status.tts.install}</code></p>
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[#b06a00]">{t("settings.ttsNeedInstall")}
+              <InstallBtn target="tts" state={engineInstall} onInstall={doInstall} t={t} />
+            </div>
           )}
           <p className="mt-1.5 text-[11px] leading-relaxed text-stone">{t("settings.ttsDesc")}</p>
         </Section>
@@ -592,6 +623,19 @@ export function SettingsMenu({
         </div>
       </div>
     </div>
+  );
+}
+
+/** 앱에서 바로 옵셔널 엔진 설치(터미널 불필요). 전역 1개씩 — 설치 중이면 진행 표시. */
+function InstallBtn({ target, state, onInstall, t }: { target: string; state: api.EngineInstall; onInstall: (target: string) => void; t: (k: string) => string }) {
+  const installingThis = state.state === "installing" && state.target === target;
+  const anyInstalling = state.state === "installing";
+  if (installingThis) return <span className="inline-flex items-center gap-1 text-spark-deep"><Loader2 className="size-3 animate-spin" /> {t("settings.installing")}</span>;
+  return (
+    <button onClick={() => onInstall(target)} disabled={anyInstalling}
+      className="inline-flex items-center gap-1 rounded-md bg-ink px-2 py-0.5 text-[11px] font-medium text-canvas disabled:opacity-40">
+      <Download className="size-3" /> {t("settings.installInApp")}
+    </button>
   );
 }
 

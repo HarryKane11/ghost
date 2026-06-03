@@ -652,6 +652,27 @@ async def ws_stt(ws: WebSocket) -> None:
         sess.close()
 
 
+class EngineInstallReq(BaseModel):
+    target: str
+
+
+@app.post("/api/stt/engine/install")
+def stt_engine_install(req: EngineInstallReq) -> dict:
+    """터미널 없이 앱에서 옵셔널 엔진 설치(로컬 STT·스트리밍·TTS 등)."""
+    return stt.install_engine(req.target)
+
+
+@app.get("/api/stt/engine/install")
+def stt_engine_install_status() -> dict:
+    return stt.engine_install_status()
+
+
+@app.get("/api/stt/engine/target")
+def stt_engine_target() -> dict:
+    """현재 STT 모델을 쓰려면 설치해야 할 타깃(extra 이름)."""
+    return {"target": stt.install_target_for(stt.active_model())}
+
+
 @app.get("/api/stt/models")
 def stt_models() -> dict:
     """선택 가능한 로컬/클라우드 STT 모델 목록 + 현재 활성 모델."""

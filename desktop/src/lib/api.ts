@@ -289,6 +289,14 @@ export async function getSttStreaming(): Promise<{ available: boolean; model?: s
 export async function getSttModels(): Promise<SttModels | null> {
   try { return await (await fetch(`${BASE}/api/stt/models`)).json(); } catch { return null; }
 }
+// 인앱 엔진 설치 (터미널 불필요)
+export type EngineInstall = { state: "idle" | "installing" | "done" | "error"; target?: string | null; error?: string | null };
+export async function installEngine(target: string): Promise<EngineInstall> {
+  try { return await (await fetch(`${BASE}/api/stt/engine/install`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ target }) })).json(); } catch (e) { return { state: "error", error: String(e) }; }
+}
+export async function getEngineInstall(): Promise<EngineInstall> {
+  try { return await (await fetch(`${BASE}/api/stt/engine/install`)).json(); } catch { return { state: "idle" }; }
+}
 export async function selectSttModel(kind: "local" | "cloud", modelId: string): Promise<{ ok: boolean; model?: string }> {
   try {
     const r = await fetch(`${BASE}/api/stt/select`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, model_id: modelId }) });
