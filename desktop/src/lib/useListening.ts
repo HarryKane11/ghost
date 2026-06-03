@@ -47,6 +47,7 @@ export function useListening() {
   const streamRef = useRef<MediaStream | null>(null);
   const sysStreamRef = useRef<MediaStream | null>(null);   // 캐시된 시스템 오디오 스트림(권한 재요청 방지)
   const curSourceRef = useRef<Source>("mic");
+  const aliveRef = useRef(false);   // 청취 중 여부 — 정지 후 오디오 처리/ws 메시지를 확실히 차단
   const ctxRef = useRef<AudioContext | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
   const srcNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -101,6 +102,7 @@ export function useListening() {
   }, [extract]);
 
   const onAudio = useCallback((ev: AudioProcessingEvent) => {
+    if (!aliveRef.current) return;   // 정지 후엔 어떤 오디오도 처리하지 않음(전사 계속되는 문제 차단)
     const input = ev.inputBuffer.getChannelData(0);
     const n = input.length;
     const ring = ringRef.current!;
@@ -206,6 +208,7 @@ export function useListening() {
         const ws = new WebSocket(streamUrlRef.current);
         ws.binaryType = "arraybuffer";
         ws.onmessage = (e) => {
+          if (!aliveRef.current) return;   // 정지 후 도착한 ws 결과 무시
           try {
             const d = JSON.parse(e.data);
             if (d.error) { ws.close(); wsRef.current = null; return; }  // 미지원 → 폴백
@@ -248,12 +251,14 @@ export function useListening() {
       silenceMsRef.current = 0;
       interimMsRef.current = 0;
       noiseRef.current = 0.012;
+      aliveRef.current = true;   // 청취 시작 — onAudio/ws 처리 허용
       await acquire(source, deviceId); // 권한/지원 에러는 throw → 호출부 처리
     },
     [acquire]
   );
 
   const stop = useCallback(() => {
+    aliveRef.current = false;   // 즉시 차단 — 이후 onAudio/ws/finalize는 아무것도 안 함
     try { wsRef.current?.close(); } catch {}
     wsRef.current = null;
     try { procRef.current?.disconnect(); } catch {}
