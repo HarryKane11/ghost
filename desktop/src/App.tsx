@@ -3,7 +3,7 @@ import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, SlidersHorizontal, AudioLines, Square,
   HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Copy,
-  Languages, Columns2, PanelRight, LayoutDashboard, MonitorPlay,
+  Languages, Columns2, PanelRight, LayoutDashboard, Home,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -11,6 +11,8 @@ import { Waveform } from "@/components/Waveform";
 import { GenUI, type Spec } from "@/components/GenUI";
 import { SettingsMenu } from "@/components/SettingsMenu";
 import { WatchView } from "@/components/WatchView";
+import { AudioView } from "@/components/AudioView";
+import { Launcher, type LaunchMode } from "@/components/Launcher";
 import { loadAppFont } from "@/components/FontSettings";
 import { Onboarding } from "@/components/Onboarding";
 import { Help } from "@/components/Help";
@@ -199,9 +201,10 @@ export default function App() {
   const [thinking, setThinking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);   // 전체화면 관리자 페이지
-  const [watchOpen, setWatchOpen] = useState(false);   // YouTube 워치 모드(시스템 오디오 STT + 스크립트·번역)
+  // 진입 런처 + 모드 라우터. 매 실행 'home'(런처)에서 시작.
+  const [appMode, setAppMode] = useState<"home" | "live" | "watch" | "audio">("home");
   const watchOpenRef = useRef(false);
-  useEffect(() => { watchOpenRef.current = watchOpen; }, [watchOpen]);
+  useEffect(() => { watchOpenRef.current = appMode === "watch"; }, [appMode]);
   const [backendMenuOpen, setBackendMenuOpen] = useState(false);
   const [ctxOpen, setCtxOpen] = useState(false);
   const [ctxText, setCtxText] = useState("");
@@ -304,7 +307,7 @@ export default function App() {
   // ref 가드로 한 번에 하나만 — 진행 중 번역을 새 줄/상태 변화로 취소하지 않는다(이전 버그: 첫 줄 뒤 멈춤).
   const translatingRef = useRef(false);
   useEffect(() => {
-    if ((displayMode !== "interview" && !watchOpen) || translatingRef.current) return;
+    if ((displayMode !== "interview" && appMode !== "watch") || translatingRef.current) return;
     const pending = transcript.find((ln) => translations[`${transLang}:${ln.id}`] === undefined);
     if (!pending) return;
     translatingRef.current = true;
@@ -317,7 +320,7 @@ export default function App() {
       onDone: () => { setTranslations((m) => ({ ...m, [key]: acc.trim() })); translatingRef.current = false; },
       onError: () => { translatingRef.current = false; },
     });
-  }, [displayMode, watchOpen, transLang, transcript, translations]);
+  }, [displayMode, appMode, transLang, transcript, translations]);
 
   // 패널 분할 드래그(리사이즈 핸들러)
   const splitRef = useRef<HTMLDivElement | null>(null);
@@ -609,6 +612,18 @@ export default function App() {
     catch (e) { setActive(false); flash(t(captureErrKey(e))); }
   }, [active, start, stop, onUtterance, onInterim, onCommitted, source, micId, t]);
 
+  // 런처에서 모드 선택 → 진입. 워치는 시스템 오디오로 듣는다.
+  const enterMode = useCallback((m: LaunchMode) => {
+    if (m === "watch") setSource("system");
+    setAppMode(m);
+  }, [setSource]);
+  // 어느 모드에서든 런처(home)로 복귀. 듣는 중이면 멈추고 마이크로 원복.
+  const goHome = useCallback(() => {
+    if (active) { setActive(false); stop(); setDraft(""); const mid = meetingIdRef.current; if (mid) api.endMeeting(mid); }
+    setSource("mic");
+    setAppMode("home");
+  }, [active, stop, setSource]);
+
   // @[제목] 참조를 풀어 해당 지난 회의 요약을 쿼리에 덧붙인다.
   const resolveRefs = useCallback(async (q: string): Promise<string> => {
     const ids = [...q.matchAll(/@\[([^\]]+)\]/g)].map((m) => m[1]);
@@ -788,7 +803,8 @@ export default function App() {
 
   return (
    <LangProvider lang={lang} setLang={changeLang}>
-    <div className="flex h-full flex-col bg-background text-foreground">
+    {appMode === "home" && <Launcher onSelect={enterMode} isMac={isMacApp} t={t} />}
+    <div className={cn("h-full flex-col bg-background text-foreground", appMode === "home" ? "hidden" : "flex")}>
       {/* 상단 바 */}
       <header className="relative z-10 flex h-12 shrink-0 items-center gap-3 border-b border-hairline px-3" style={{ ...DRAG, paddingLeft: isMacApp ? 80 : undefined }}>
         <div className="flex items-center gap-2"><GhostLogo variant="icon" size={20} className="rounded-md" /><span className="text-[14px] font-semibold tracking-tight">Ghost</span></div>
@@ -832,7 +848,7 @@ export default function App() {
           <button onClick={() => setHelpOpen(true)} title={t("header.help")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><HelpCircle className="size-4" /></button>
           <button onClick={() => setMenuOpen(true)} title="설정·관리" className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><SlidersHorizontal className="size-3.5" /> {t("header.menu")}</button>
           <button onClick={() => setAdminOpen(true)} title={t("header.admin")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><LayoutDashboard className="size-3.5" /> {t("header.admin")}</button>
-          <button onClick={() => { setSource("system"); setWatchOpen(true); }} title={t("header.watch")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><MonitorPlay className="size-3.5" /> {t("header.watch")}</button>
+          <button onClick={goHome} title={t("header.home")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><Home className="size-3.5" /> {t("header.home")}</button>
           <button onClick={() => setVoiceOn((v) => !v)} title={voiceOn ? t("header.voiceOff") : t("header.voiceOn")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground">{voiceOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}</button>
           <button onClick={() => setDark((d) => !d)} title={t("header.theme")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground">{dark ? <Moon className="size-4" /> : <Sun className="size-4" />}</button>
         </div>
@@ -1157,8 +1173,8 @@ export default function App() {
 
       {/* YouTube 워치 모드 — 임베드 영상 + 시스템오디오 STT 스크립트·번역 + 플로팅 고스트 챗 */}
       <WatchView
-        open={watchOpen}
-        onClose={() => { if (active) toggleActive(); setWatchOpen(false); setSource("mic"); }}
+        open={appMode === "watch"}
+        onClose={goHome}
         active={active}
         onToggleListen={toggleActive}
         transcript={transcript}
@@ -1172,6 +1188,9 @@ export default function App() {
         t={t}
         isMac={isMacApp}
       />
+
+      {/* 음성 파일 모드 — 업로드 → 타임스탬프 전사 + 재생 + 회의록(구간 재생 주석) */}
+      <AudioView open={appMode === "audio"} onClose={goHome} isMac={isMacApp} t={t} />
 
       <Onboarding
         open={onboard}

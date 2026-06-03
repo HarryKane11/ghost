@@ -115,6 +115,27 @@ MINUTES_SYSTEM = (
     f"{WORKLOAD_DECISION_RULES}"
 )
 
+MINUTES_TS_SYSTEM = (
+    "너는 'Ghost', 회의 비서다. 아래 전사는 각 줄이 [mm:ss] 또는 [hh:mm:ss] 타임스탬프로 시작하는 "
+    "'음성 파일' 전사다. 전체를 처음부터 끝까지 읽고 흐름을 이해한 뒤, 사람이 정리한 듯 상세하고 "
+    "구조적인 회의록을 작성한다. 전사가 거칠어도 의미를 파악해 매끄럽게 정제한다. 전사에 쓰인 언어로 작성.\n"
+    "★ 가장 중요: 회의록의 각 항목(요약 문장·논의 불릿·결정·액션) 끝에 그 내용이 '근거한' 음성 구간의 "
+    "타임스탬프를 반드시 [mm:ss] 형식으로 붙인다. 예: '가격 정책을 월 3.9만원으로 확정 [12:34]'. "
+    "여러 구간을 참고했으면 가장 핵심 구간 1개만. 타임스탬프는 전사에 실제로 나온 시각만 쓴다(지어내지 말 것).\n"
+    "반드시 JSON 한 개만 출력: "
+    '{"title": str, "spoken": str, "intent": "note", "blocks": [...]}\n'
+    f"{ALLOWED_BLOCKS}\n"
+    "blocks 권장 구성(heading 텍스트는 제목만):\n"
+    "1) heading \"회의 요약\" → text: 핵심 결과 3~5문장 (각 문장 끝 [mm:ss])\n"
+    "2) heading \"주요 논의\" → 안건별 heading(소제목) + list. 각 불릿 끝에 [mm:ss].\n"
+    "3) heading \"결정 사항\" → list (각 항목 끝 [mm:ss])\n"
+    "4) heading \"액션 아이템\" → table[담당 | 할 일 | 기한] 또는 list (가능하면 [mm:ss])\n"
+    "5) (있으면) heading \"미해결·후속\" → list (각 항목 끝 [mm:ss])\n"
+    "원칙: 전사에 실제로 있는 내용만. spoken: \"회의록 정리했어요\" 정도의 짧은 한마디(타임스탬프 없이).\n"
+    "image/handwritten 블록은 쓰지 마라.\n"
+    f"{WORKLOAD_DECISION_RULES}"
+)
+
 MINUTES_IMG_PROMPT = (
     "너는 회의 비서다. $imagegen (내장 이미지 생성, gpt-image-2)으로, 아래 회의를 "
     "손그림 스케치노트(sketchnote) 스타일의 가로형 인포그래픽으로 정리한 이미지를 만들어 "
@@ -807,24 +828,29 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
     yield ("result", _normalize_spec(spec, fallback_text=fallback))
 
 
-def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: str = ""):
-    """회의록 생성: codex가 전사 전체를 이해해 상세 회의록 JSON을 만들고(손글씨 이미지도),
-    결과로 반환. context(사용자 맥락·고유명사)가 있으면 정확도↑.
+def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: str = "",
+                   system: Optional[str] = None, with_image: bool = True):
+    """회의록 생성: AI 백엔드가 전사 전체를 이해해 상세 회의록 JSON을 만든다.
 
-    전사 + 맥락을 함께 넘겨 codex가 회의를 '이해'한 뒤 주제별로 상세 정리하게 한다."""
+    system: 회의록 시스템 프롬프트(기본 MINUTES_SYSTEM, 음성파일은 MINUTES_TS_SYSTEM 전달).
+    with_image: codex 손글씨 스케치노트 첨부 여부(음성파일 모드는 False 권장)."""
     cfg = cfg or BrainConfig()
+    system = system or MINUTES_SYSTEM
     ctx_block = (f"[회의 배경(사용자 제공) — 고유명사·맥락 참고]\n{context}\n\n" if context.strip() else "")
     user_input = f"{ctx_block}[회의 전사 전체]\n{transcript}"
     if cfg.backend != "codex":
         yield ("progress", "회의록 정리 중…")
-        yield ("result", act("아래 회의 전사를 이해해 상세 회의록을 작성해줘.", user_input, cfg, MINUTES_SYSTEM))
+        yield ("result", act("아래 회의 전사를 이해해 상세 회의록을 작성해줘.", user_input, cfg, system))
         return
 
     # 1) 구조화 회의록(요약·논의·결정·액션) — 먼저 빠르게 내보낸다(이미지 기다리다 타임아웃 방지).
     yield ("progress", "회의록 정리 중…")
-    spec = act("아래 회의 전사를 처음부터 끝까지 이해한 뒤, 주제별로 상세 회의록을 작성해줘.", user_input, cfg, MINUTES_SYSTEM)
+    spec = act("아래 회의 전사를 처음부터 끝까지 이해한 뒤, 주제별로 상세 회의록을 작성해줘.", user_input, cfg, system)
     spec["title"] = spec.get("title") or "회의록"
     yield ("result", spec)  # ← 텍스트 회의록 먼저 표시(클라이언트 타임아웃 해제)
+
+    if not with_image:
+        return
 
     # 2) 손글씨 이미지(느림·불안정)는 best-effort로 뒤에 붙여 두 번째 result로 갱신.
     yield ("progress", "손글씨 회의록 그리는 중…")

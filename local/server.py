@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from ghost_local import brain, memory, stt, stt_cloud, stt_cloud_stream, stt_stream, store, tts
+from ghost_local import audio, brain, memory, stt, stt_cloud, stt_cloud_stream, stt_stream, store, tts
 
 
 def _load_dotenv() -> None:
@@ -885,6 +885,75 @@ async def transcribe(audio: UploadFile = File(...), meeting_id: str = Form(""), 
         store.append_transcript(mid, text, source=source or "mic")
         _bg_fold(mid)
     return {"text": text, **used}
+
+
+# ── 음성 파일 업로드 → 타임스탬프 전사 + 회의록 ──────────────────────────────
+def _fmt_ts(sec: float) -> str:
+    sec = int(sec or 0)
+    h, m, s = sec // 3600, (sec % 3600) // 60, sec % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+@app.post("/api/audio/transcribe")
+async def audio_transcribe(audio_file: UploadFile = File(...)) -> dict:
+    """업로드 음성(mp3/mp4/m4a/wav…) → 설정된 ASR로 타임스탬프 세그먼트 전사."""
+    raw = os.path.join(tempfile.gettempdir(), f"ghost_audio_{uuid.uuid4().hex}")
+    with open(raw, "wb") as f:
+        shutil.copyfileobj(audio_file.file, f)
+    try:
+        provider = STATE.get("stt_provider", "elevenlabs")
+        segs = audio.transcribe_segments(raw, provider, STATE.get("lang"), stt_cloud.elevenlabs_key())
+        # ElevenLabs로 전사했으면 사용량 누적(전체 길이).
+        try:
+            if provider == "elevenlabs" and stt_cloud.elevenlabs_key() and segs:
+                from ghost_local import usage
+                usage.record_eleven_stt(audio._duration(raw))
+        except Exception:  # noqa: BLE001
+            pass
+        model = stt_cloud.active_model() if provider == "elevenlabs" and stt_cloud.elevenlabs_key() else stt.active_model()
+        return {"ok": True, "segments": segs, "provider": provider, "model": model, "duration": audio._duration(raw)}
+    finally:
+        try:
+            os.unlink(raw)
+        except OSError:
+            pass
+
+
+class AudioMinutesReq(BaseModel):
+    segments: list = []   # [{start, end, text}]
+    context: str = ""
+
+
+@app.post("/api/audio/minutes/stream")
+def audio_minutes_stream(req: AudioMinutesReq) -> StreamingResponse:
+    """타임스탬프 전사 → AI 백엔드로 상세 회의록(각 항목에 [mm:ss] 인용) 생성."""
+    cfg = _cfg()
+    label = BACKEND_LABEL[STATE["backend"]]
+    # 전사를 [mm:ss] text 줄로 직렬화 → 모델이 시각을 인용할 수 있게.
+    lines = []
+    for s in (req.segments or []):
+        if isinstance(s, dict) and (s.get("text") or "").strip():
+            lines.append(f"[{_fmt_ts(s.get('start', 0))}] {s['text'].strip()}")
+    transcript = "\n".join(lines)
+
+    def gen():
+        if not transcript:
+            yield _sse("error", {"error": "전사 내용이 비었어요."})
+            return
+        try:
+            for kind, payload in brain.minutes_stream(transcript, cfg, context=req.context,
+                                                      system=brain.MINUTES_TS_SYSTEM, with_image=False):
+                if kind == "progress":
+                    yield _sse("progress", payload if isinstance(payload, dict) else {"text": payload})
+                elif kind == "result":
+                    yield _sse("result", {"spec": payload, "backend_label": label})
+        except Exception as ex:  # noqa: BLE001
+            yield _sse("error", {"error": str(ex)})
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── 라우팅 + 스트리밍 액션 ──────────────────────────────────────────────────

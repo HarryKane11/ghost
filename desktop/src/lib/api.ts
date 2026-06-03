@@ -400,6 +400,29 @@ export async function transcribe(blob: Blob, meetingId = "", source = "mic"): Pr
   return { ...j, text: (j.text || "").trim() };
 }
 
+// ── 음성 파일 업로드 모드 ────────────────────────────────────────────────────
+export type AudioSegment = { start: number; end: number; text: string };
+export type AudioTranscript = { ok: boolean; segments: AudioSegment[]; provider?: string; model?: string; duration?: number };
+export async function uploadAudio(file: File, onProgress?: (pct: number) => void): Promise<AudioTranscript> {
+  const fd = new FormData();
+  fd.append("audio_file", file, file.name);
+  // XHR로 업로드 진행률 제공(큰 파일 대비).
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/api/audio/transcribe`);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100)); };
+    xhr.onload = () => {
+      try { resolve(JSON.parse(xhr.responseText)); }
+      catch { reject(new Error("transcribe parse failed")); }
+    };
+    xhr.onerror = () => reject(new Error("audio transcribe failed"));
+    xhr.send(fd);
+  });
+}
+export function streamAudioMinutes(segments: AudioSegment[], context: string, h: StreamHandlers) {
+  return streamSSE("/api/audio/minutes/stream", { segments, context }, h);
+}
+
 export async function ttsUrl(text: string): Promise<string> {
   const r = await fetch(`${BASE}/api/tts`, {
     method: "POST",

@@ -6,6 +6,31 @@ import {
 
 /** 카드 내 버튼/액션 클릭 → 후속 질의를 앱 라우팅으로 되먹임(인터랙티브 루프). */
 const ActionCtx = createContext<((query: string) => void) | null>(null);
+/** 음성 회의록: 텍스트 내 [mm:ss] 타임스탬프 클릭 → 해당 구간 재생. */
+const SeekCtx = createContext<((sec: number) => void) | null>(null);
+
+const TS_RE = /(\[\d{1,2}:\d{2}(?::\d{2})?\])/g;
+/** 문자열 안의 [mm:ss]/[hh:mm:ss]를 재생 버튼으로 렌더(onSeek 있을 때). 없으면 평문. */
+function TsText({ children }: { children?: string }) {
+  const onSeek = useContext(SeekCtx);
+  const s = children ?? "";
+  if (!onSeek || !s || !/\[\d{1,2}:\d{2}/.test(s)) return <>{s}</>;
+  return (
+    <>
+      {s.split(TS_RE).map((p, i) => {
+        const m = p.match(/^\[(\d{1,2}):(\d{2})(?::(\d{2}))?\]$/);
+        if (!m) return <span key={i}>{p}</span>;
+        const sec = m[3] ? +m[1] * 3600 + +m[2] * 60 + +m[3] : +m[1] * 60 + +m[2];
+        return (
+          <button key={i} onClick={() => onSeek(sec)} title="이 구간 재생"
+            className="mx-0.5 inline-flex items-center gap-0.5 rounded-md border border-spark-soft bg-[color-mix(in_srgb,var(--spark)_10%,transparent)] px-1.5 py-px align-middle text-[11px] font-medium text-spark-deep transition-colors hover:bg-[color-mix(in_srgb,var(--spark)_20%,transparent)]">
+            ▶ {p.slice(1, -1)}
+          </button>
+        );
+      })}
+    </>
+  );
+}
 
 /** 깨진/없는 이미지 URL이면 조용히 숨긴다 (회의록 외 image 블록 깨짐 방지) */
 function ImageBlock({ url, label }: { url?: string; label?: string }) {
@@ -258,7 +283,7 @@ function BlockView({ b }: { b: Block }) {
     case "heading":
       return <h4 className="mt-3 text-[13.5px] font-semibold tracking-tight text-foreground first:mt-0">{b.text}</h4>;
     case "text":
-      return <p className="text-[13.5px] leading-relaxed text-charcoal">{b.text}</p>;
+      return <p className="text-[13.5px] leading-relaxed text-charcoal"><TsText>{b.text}</TsText></p>;
     case "divider":
       return <hr className="my-1 border-hairline" />;
     case "stat":
@@ -293,7 +318,7 @@ function BlockView({ b }: { b: Block }) {
             <tbody>
               {body.map((r, i) => (
                 <tr key={i} className="border-t border-hairline">
-                  {r.map((c, j) => <td key={j} className="px-3 py-1.5 text-charcoal">{c}</td>)}
+                  {r.map((c, j) => <td key={j} className="px-3 py-1.5 text-charcoal"><TsText>{c}</TsText></td>)}
                 </tr>
               ))}
             </tbody>
@@ -306,7 +331,7 @@ function BlockView({ b }: { b: Block }) {
         <ul className="space-y-1.5">
           {(b.items || []).map((it, i) => (
             <li key={i} className="flex gap-2 text-[13px] leading-relaxed text-charcoal">
-              <span className="mt-[7px] size-1 shrink-0 rounded-full bg-spark" /><span>{it}</span>
+              <span className="mt-[7px] size-1 shrink-0 rounded-full bg-spark" /><span><TsText>{it}</TsText></span>
             </li>
           ))}
         </ul>
@@ -316,7 +341,7 @@ function BlockView({ b }: { b: Block }) {
         <ol className="space-y-1.5">
           {(b.items || []).map((it, i) => (
             <li key={i} className="flex gap-2.5 text-[13px] leading-relaxed text-charcoal">
-              <span className="font-mono text-[11px] text-stone">{String(i + 1).padStart(2, "0")}</span><span>{it}</span>
+              <span className="font-mono text-[11px] text-stone">{String(i + 1).padStart(2, "0")}</span><span><TsText>{it}</TsText></span>
             </li>
           ))}
         </ol>
@@ -359,7 +384,7 @@ function BlockView({ b }: { b: Block }) {
           <Icon className="mt-0.5 size-4 shrink-0" />
           <div>
             {b.label && <div className="text-[12.5px] font-semibold">{b.label}</div>}
-            <div className="text-[12.5px] leading-relaxed opacity-90">{b.text}</div>
+            <div className="text-[12.5px] leading-relaxed opacity-90"><TsText>{b.text}</TsText></div>
           </div>
         </div>
       );
@@ -437,10 +462,11 @@ function groupBlocks(blocks: Block[]) {
   return groups;
 }
 
-export function GenUI({ spec, onAction }: { spec: Spec; onAction?: (query: string) => void }) {
+export function GenUI({ spec, onAction, onSeek }: { spec: Spec; onAction?: (query: string) => void; onSeek?: (sec: number) => void }) {
   const groups = groupBlocks(spec.blocks || []);
   return (
     <ActionCtx.Provider value={onAction ?? null}>
+    <SeekCtx.Provider value={onSeek ?? null}>
     <div className="space-y-3">
       {groups.map((g, gi) =>
         g.kind === "stats" ? (
@@ -452,6 +478,7 @@ export function GenUI({ spec, onAction }: { spec: Spec; onAction?: (query: strin
         )
       )}
     </div>
+    </SeekCtx.Provider>
     </ActionCtx.Provider>
   );
 }
