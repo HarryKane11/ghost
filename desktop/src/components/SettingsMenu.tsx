@@ -308,8 +308,9 @@ export function SettingsMenu({
                   </div>
                 );
               })()}
-              {/* 선택한 모델 미다운로드 → 바로 다운로드 */}
-              {sttModel && !sttModel.present && (sttModels?.local.find((x) => x.id === sttModels.local_active)?.engine_ready !== false) && (
+              {/* 선택한 모델 미다운로드 또는 다운로드 중 → 다운로드 UI (진행률은 state 기준으로 표시) */}
+              {sttModel && (sttModels?.local.find((x) => x.id === sttModels.local_active)?.engine_ready !== false)
+                && (sttModel.state === "downloading" || !sttModel.present) && (
                 <div className="mt-2">
                   {sttModel.state === "downloading" ? (
                     <div>
@@ -468,15 +469,15 @@ export function SettingsMenu({
           {sttModel && (
             <div className="mt-3 border-t border-hairline pt-3">
               <div className="mb-1 text-[11px] text-stone">{t("settings.localModel")}</div>
-              {sttModel.present ? (
-                <div className="flex items-center gap-1.5 text-[12.5px] text-spark-deep"><Check className="size-3.5" /> {t("settings.modelReady")}</div>
-              ) : sttModel.state === "downloading" ? (
+              {sttModel.state === "downloading" ? (
                 <div>
                   <div className="h-2 overflow-hidden rounded-full bg-surface">
                     <div className="h-full rounded-full bg-spark transition-all" style={{ width: `${sttModel.percent}%` }} />
                   </div>
                   <div className="mt-1 text-[11px] text-stone">{t("settings.modelDownloading")} {gb(sttModel.downloaded)} / {gb(sttModel.total)} ({sttModel.percent}%)</div>
                 </div>
+              ) : sttModel.present ? (
+                <div className="flex items-center gap-1.5 text-[12.5px] text-spark-deep"><Check className="size-3.5" /> {t("settings.modelReady")}</div>
               ) : (
                 <div>
                   <button onClick={downloadModel} className="h-9 rounded-lg bg-ink px-3.5 text-[13px] font-medium text-canvas">

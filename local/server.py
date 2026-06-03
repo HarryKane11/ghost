@@ -616,8 +616,8 @@ async def ws_stt(ws: WebSocket) -> None:
         except Exception:  # noqa: BLE001
             pass
 
-    if not stt_stream.streaming_supported(stt.active_model()):
-        await ws.send_json({"text": "", "final": True, "error": "현재 모델은 네이티브 스트리밍 미지원"})
+    if not (stt_stream.streaming_supported(stt.active_model()) and stt.model_present(stt.active_model())):
+        await ws.send_json({"text": "", "final": True, "error": "현재 모델은 네이티브 스트리밍 미지원/미다운로드"})
         await ws.close()
         return
     sess = stt_stream.make_session(repo, emit)

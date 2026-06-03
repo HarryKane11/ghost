@@ -192,6 +192,17 @@ def _dir_size(p: Path) -> int:
     return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
 
 
+@lru_cache(maxsize=16)
+def _repo_total_bytes(repo: str) -> int:
+    """HF repo의 실제 총 파일 크기(정확한 진행률용). 실패 시 0 → approx로 폴백. (repo당 1회 네트워크)"""
+    try:
+        from huggingface_hub import HfApi
+        info = HfApi().model_info(repo, files_metadata=True)
+        return sum((s.size or 0) for s in (info.siblings or []))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def model_present(model_path: Optional[str] = None) -> bool:
     """모델이 이미 로컬 캐시에 받아져 있는지(네트워크 없이 확인). repo 기준."""
     repo = _repo(model_path or active_model())
@@ -209,17 +220,21 @@ def download_status(model_path: Optional[str] = None) -> dict:
     repo = _repo(mp)
     present = model_present(mp)
     state = _DL["state"]
-    if present and state != "downloading":
+    # 완료 판단은 '워커 스레드 종료(state)' 기준. present가 다운로드 막판에 먼저 True로 떠도
+    # state가 downloading이면 계속 진행 중으로 본다(진행률 바가 갑자기 사라지지 않게).
+    if present and state == "idle":
         state = "done"
     downloaded = _dir_size(_hf_cache_dir(repo))
-    total = _approx_bytes(mp)
+    total = _repo_total_bytes(repo) or _approx_bytes(mp)
+    done = state == "done" or (present and state != "downloading")
+    pct = 100 if done else min(99, int(downloaded * 100 / total)) if total else 0
     return {
         "repo": repo,
         "present": present,
         "state": state,
         "downloaded": downloaded,
         "total": total,
-        "percent": 100 if present else min(99, int(downloaded * 100 / total)),
+        "percent": max(0, pct),
         "error": _DL["error"],
     }
 
