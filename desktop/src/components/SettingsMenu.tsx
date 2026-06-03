@@ -252,6 +252,21 @@ export function SettingsMenu({
                 <button onClick={() => customModel.trim() && pickLocalModel(customModel.trim())} disabled={!customModel.trim()}
                   className="h-9 shrink-0 rounded-lg border border-hairline px-3 text-[12.5px] text-steel hover:text-foreground disabled:opacity-40">{t("settings.sttUseCustom")}</button>
               </div>
+              {/* 선택된 모델의 엔진·능력 배지 + 미설치 안내 */}
+              {(() => {
+                const m = sttModels.local.find((x) => x.id === sttModels.local_active);
+                if (!m?.engine) return null;
+                return (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="rounded-full bg-surface px-2 py-0.5 text-[10.5px] text-steel">{m.engine}</span>
+                    {m.streaming && <span className="rounded-full bg-spark-soft px-2 py-0.5 text-[10.5px] text-spark-deep">⚡ {t("settings.sttStreaming")}</span>}
+                    {m.diarization && <span className="rounded-full bg-spark-soft px-2 py-0.5 text-[10.5px] text-spark-deep">👥 {t("settings.sttDiarization")}</span>}
+                    {m.engine_ready === false && m.install && (
+                      <span className="w-full text-[11px] text-[#b06a00]">{t("settings.sttNeedInstall")} <code className="rounded bg-surface px-1 font-mono">{m.install}</code></span>
+                    )}
+                  </div>
+                );
+              })()}
               <p className="mt-1.5 text-[11px] leading-relaxed text-stone">{t("settings.sttModelDesc")}</p>
             </div>
           )}

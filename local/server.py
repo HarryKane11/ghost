@@ -569,7 +569,7 @@ def set_glossary_ep(req: GlossaryReq) -> dict:
 def stt_models() -> dict:
     """선택 가능한 로컬/클라우드 STT 모델 목록 + 현재 활성 모델."""
     return {
-        "local": stt.LOCAL_MODELS,
+        "local": stt.models_with_status(),   # engine·streaming·diarization·engine_ready 포함
         "local_active": stt.active_model(),
         "cloud": stt_cloud.CLOUD_MODELS,
         "cloud_active": stt_cloud.active_model(),
