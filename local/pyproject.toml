@@ -4,20 +4,21 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
+# 코어 = 클라우드(기본) 경로만. 가볍게 — ElevenLabs(STT) + Codex/OpenAI(brain).
+# 로컬 STT/TTS 모델 런타임은 전부 옵셔널(설치 시에만). 앱을 가볍게 유지.
 dependencies = [
     "fastapi>=0.110",
     "mcp>=1.27.2",
-    "mlx-audio>=0.4.3",
-    "mlx-whisper>=0.4.3",
     "openai>=2.38.0",
+    "httpx>=0.27",                # 클라우드 STT(ElevenLabs)
     "python-multipart>=0.0.29",
-    "soundfile>=0.13.1",
-    "supertonic>=1.3.1",
     "uvicorn[standard]>=0.27",
 ]
 
-# 무거운/선택적 STT 엔진 — 코어 백엔드 기동에 불필요(설치 시에만 활성). 번들 기동 안정성↑.
+# 로컬은 '설치해야 쓰는' 것 — 코어 기동에 불필요(설치 시에만 활성).
 [project.optional-dependencies]
+local = ["mlx-audio>=0.4.3", "mlx-whisper>=0.4.3", "soundfile>=0.13.1"]  # 로컬 STT (Qwen3/Whisper, mlx)
+tts = ["supertonic>=1.3.1"]                # 로컬 TTS (음성 응답)
 streaming = ["parakeet-mlx>=0.5.1"]        # 진짜 토큰-스트리밍 (uv sync --extra streaming)
 faster-whisper = ["faster-whisper>=1.0"]   # CTranslate2 Whisper
 whisperx = ["whisperx>=3.1"]               # 화자분리 + 단어 타임스탬프

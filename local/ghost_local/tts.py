@@ -7,12 +7,27 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import tempfile
 from functools import lru_cache
 from typing import Optional
 
 DEFAULT_VOICE = "F1"
+
+# 설치형 — 코어에 번들하지 않고 모델 목록만 제공. 음성 응답이 필요할 때만 설치.
+TTS_NAME = "Supertonic 3"
+TTS_INSTALL = "uv sync --extra tts"   # 또는 uv pip install supertonic
+VOICES = ["F1", "F2", "F3", "F4", "F5", "M1", "M2", "M3", "M4", "M5"]
+
+
+def available() -> bool:
+    """TTS 엔진(supertonic) 설치 여부. 미설치면 음성 응답 비활성(텍스트만)."""
+    return importlib.util.find_spec("supertonic") is not None
+
+
+def info() -> dict:
+    return {"name": TTS_NAME, "available": available(), "install": TTS_INSTALL, "voices": VOICES, "default_voice": DEFAULT_VOICE}
 
 
 @lru_cache(maxsize=1)

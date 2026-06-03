@@ -53,7 +53,8 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
-STATE = {"backend": "codex", "stt_ready": False, "codex_model": None, "reasoning_effort": "low", "lang": "ko", "stt_provider": "local"}
+# 기본은 Cloud(가벼움) — STT=ElevenLabs(키), brain=Codex(auth). 로컬은 설치해야 쓰는 옵션.
+STATE = {"backend": "codex", "stt_ready": False, "codex_model": None, "reasoning_effort": "low", "lang": "ko", "stt_provider": "elevenlabs"}
 LANGS = ["ko", "en", "zh"]
 STT_PROVIDERS = ["local", "elevenlabs"]  # local=Qwen3-ASR(온디바이스), elevenlabs=Scribe v2(클라우드)
 
@@ -118,12 +119,21 @@ REASONING_EFFORTS = ["low", "medium", "high"]
 def _prewarm() -> None:
     """앱 시작 시 STT 모델을 백그라운드로 미리 로드 (첫 전사 24초 지연 제거)."""
     def _w():
+        # 클라우드 STT는 로컬 모델 로드가 불필요 → 즉시 ready (가벼운 기본 경로).
+        if STATE.get("stt_provider") == "elevenlabs":
+            STATE["stt_ready"] = True
+            STATE["stt_error"] = None
+            return
+        # 로컬 STT 엔진(mlx 등)이 설치돼 있을 때만 warmup. 미설치면 설치 안내.
+        if not stt.engine_available(stt._engine(stt.active_model())):
+            STATE["stt_ready"] = False
+            STATE["stt_error"] = "로컬 STT 미설치 — `uv sync --extra local`"
+            return
         try:
             stt.warmup()
             STATE["stt_ready"] = True
             STATE["stt_error"] = None
         except Exception as ex:  # noqa: BLE001
-            # 실패를 stt_ready=True로 가리면 전사 500이 조용히 발생한다 → 에러를 남긴다.
             STATE["stt_ready"] = False
             STATE["stt_error"] = str(ex)
     threading.Thread(target=_w, daemon=True).start()
@@ -153,9 +163,10 @@ def status() -> dict:
         "reasoning_efforts": REASONING_EFFORTS,
         "lang": STATE.get("lang", "ko"),
         "langs": LANGS,
-        "stt_provider": STATE.get("stt_provider", "local"),
+        "stt_provider": STATE.get("stt_provider", "elevenlabs"),
         "stt_providers": STT_PROVIDERS,
         "elevenlabs_key": bool(stt_cloud.elevenlabs_key()),
+        "tts": tts.info(),   # 설치 여부·보이스 목록·설치 안내
     }
 
 
@@ -862,8 +873,15 @@ def digest_stream_ep(req: DigestReq) -> StreamingResponse:
 
 
 # ── TTS ─────────────────────────────────────────────────────────────────────
+@app.get("/api/tts/info")
+def tts_info() -> dict:
+    """TTS(음성 응답) 설치 여부·보이스 목록·설치 안내. 설치형 — 미설치면 텍스트만."""
+    return tts.info()
+
+
 class TtsReq(BaseModel):
     text: str
+    voice: Optional[str] = None
 
 
 @app.post("/api/tts")
@@ -871,8 +889,10 @@ def synth(req: TtsReq):
     text = (req.text or "").strip()
     if not text:
         return {"ok": False, "error": "empty text"}
+    if not tts.available():
+        return {"ok": False, "error": "tts_not_installed", "message": f"음성 응답 미설치 — {tts.TTS_INSTALL}"}
     out = os.path.join(tempfile.gettempdir(), f"ghost_tts_{uuid.uuid4().hex}.wav")
-    path = tts.speak(text, out_path=out)
+    path = tts.speak(text, out_path=out, voice=req.voice or tts.DEFAULT_VOICE)
     return FileResponse(path, media_type="audio/wav", filename="ghost.wav")
 
 

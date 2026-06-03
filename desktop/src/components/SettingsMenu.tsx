@@ -166,9 +166,13 @@ export function SettingsMenu({
 
         {/* 파이프라인 플로우 — STT → Agent → TTS(선택) */}
         {(() => {
+          const isCloud = status?.stt_provider === "elevenlabs";
           const sttM = sttModels?.local.find((x) => x.id === sttModels.local_active);
-          const sttName = sttM?.label?.split(" · ")[0] || (sttModels?.local_active || "").split("/").pop() || "STT";
-          const sttReady = sttModel?.present && (sttM?.engine_ready !== false);
+          const cloudM = sttModels?.cloud.find((x) => x.id === sttModels.cloud_active);
+          const sttName = isCloud
+            ? (cloudM?.label?.split(" · ")[0] || "ElevenLabs Scribe")
+            : (sttM?.label?.split(" · ")[0] || (sttModels?.local_active || "").split("/").pop() || "STT");
+          const sttReady = isCloud ? !!status?.elevenlabs_key : (sttModel?.present && (sttM?.engine_ready !== false));
           const Stage = ({ icon, label, value, ok, accent }: { icon: React.ReactNode; label: string; value: string; ok?: boolean | null; accent?: boolean }) => (
             <div className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-xl border px-3 py-2.5", accent ? "border-spark-soft bg-spark-soft/30" : "border-hairline bg-surface-soft")}>
               <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-canvas text-steel">{icon}</span>
@@ -189,7 +193,8 @@ export function SettingsMenu({
               <Stage icon={status?.backend ? <BrandIcon name={status.backend} size={16} /> : <Code className="size-4" />} label="Agent"
                 value={status?.backend_label || "…"} ok={status ? (status.backend !== "codex" || status.codex_logged_in) : null} />
               <div className="flex shrink-0 items-center text-stone"><ChevronRight className="size-4" /></div>
-              <Stage icon={<Volume2 className="size-4" />} label={t("settings.pipeTtsOptional")} value="Supertonic" ok={null} />
+              <Stage icon={<Volume2 className="size-4" />} label={t("settings.pipeTtsOptional")}
+                value={status?.tts?.name || "Supertonic"} ok={status?.tts ? status.tts.available : null} />
             </div>
           );
         })()}
@@ -355,6 +360,21 @@ export function SettingsMenu({
               <p className="mt-1.5 text-[11px] leading-relaxed text-stone">{t("settings.elevenKeyHint")}</p>
             </div>
           )}
+        </Section>
+
+        {/* TTS (음성 응답) — 설치형, 목록만 제공 */}
+        <Section icon={<Volume2 className="size-4 text-steel" />} title={t("settings.ttsTitle")}>
+          <div className="flex items-center gap-2 text-[12.5px]">
+            <span className="font-medium text-charcoal">{status?.tts?.name || "Supertonic 3"}</span>
+            {status?.tts?.available
+              ? <span className="inline-flex items-center gap-1 text-spark-deep"><Check className="size-3.5" /> {t("settings.ttsReady")}</span>
+              : <span className="text-stone">— {t("settings.ttsOff")}</span>}
+            <span className="ml-auto text-[11px] text-stone">{(status?.tts?.voices || []).length} {t("settings.ttsVoices")}</span>
+          </div>
+          {status?.tts && !status.tts.available && (
+            <p className="mt-1.5 text-[11px] text-[#b06a00]">{t("settings.ttsNeedInstall")} <code className="rounded bg-surface px-1 font-mono">{status.tts.install}</code></p>
+          )}
+          <p className="mt-1.5 text-[11px] leading-relaxed text-stone">{t("settings.ttsDesc")}</p>
         </Section>
 
         {/* MCP connectors */}

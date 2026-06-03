@@ -18,6 +18,7 @@ export type Status = {
   stt_provider?: string;
   stt_providers?: string[];
   elevenlabs_key?: boolean;
+  tts?: { name: string; available: boolean; install: string; voices: string[]; default_voice: string };
 };
 
 export type Route = {
