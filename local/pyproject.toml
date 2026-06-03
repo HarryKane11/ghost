@@ -17,9 +17,10 @@ dependencies = [
 
 # 로컬은 '설치해야 쓰는' 것 — 코어 기동에 불필요(설치 시에만 활성).
 [project.optional-dependencies]
-local = ["mlx-audio>=0.4.3", "mlx-whisper>=0.4.3", "soundfile>=0.13.1"]  # 로컬 STT (Qwen3/Whisper, mlx)
+# 로컬 STT 풀셋 — 배치(mlx-audio) + 진짜 스트리밍(parakeet-mlx). `uv sync --extra local`이면 스트리밍까지.
+local = ["mlx-audio>=0.4.3", "mlx-whisper>=0.4.3", "soundfile>=0.13.1", "parakeet-mlx>=0.5.1"]
 tts = ["supertonic>=1.3.1"]                # 로컬 TTS (음성 응답)
-streaming = ["parakeet-mlx>=0.5.1"]        # 진짜 토큰-스트리밍 (uv sync --extra streaming)
+streaming = ["parakeet-mlx>=0.5.1"]        # 스트리밍만 따로 (local에 이미 포함)
 faster-whisper = ["faster-whisper>=1.0"]   # CTranslate2 Whisper
 whisperx = ["whisperx>=3.1"]               # 화자분리 + 단어 타임스탬프
 granite = ["transformers>=4.52", "torchaudio", "peft"]  # IBM Granite Speech

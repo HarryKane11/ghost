@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, SlidersHorizontal, AudioLines, Square,
-  HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Ghost, Copy,
+  HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Copy,
   Languages, Columns2, PanelRight,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
@@ -112,18 +112,14 @@ function CommandStep({ item, active }: { item: api.ProgressItem; active: boolean
   );
 }
 
-/** 마리오 블럭 연출: 곧 타이핑될 구조를 사각형들이 보여주고, 유령이 지나가면 블럭이
- *  머리 맞은 듯 위로 출렁이며 진해졌다 흐려진다. 세로로 잘리지 않게 overflow는 x만 숨긴다. */
-function GhostBlocks({ dur = 2.8, count = 16, size = 18, className }: { dur?: number; count?: number; size?: number; className?: string }) {
+/** 곧 들어올 문장 구조를 사각형(블럭)들이 좌→우 웨이브로 출렁이며 알려준다(유령 없음). */
+function GhostBlocks({ dur = 2.8, count = 16, className }: { dur?: number; count?: number; size?: number; className?: string }) {
   return (
     <div className={cn("ghost-blocks pointer-events-none relative flex items-center gap-1.5 py-2", className)} aria-hidden>
       {Array.from({ length: count }).map((_, i) => (
         <span key={i} className="block-bump h-2.5 w-2.5 shrink-0 rounded-[3px]"
-          style={{ ["--dur" as any]: `${dur}s`, ["--bd" as any]: `${((i + 0.5) / count) * dur}s` }} />
+          style={{ ["--dur" as any]: `${dur}s`, ["--bd" as any]: `${(i / count) * dur}s` }} />
       ))}
-      <span className="phantom-fly text-spark-deep" style={{ ["--fly-dur" as any]: `${dur}s` }}>
-        <Ghost style={{ width: size, height: size }} />
-      </span>
     </div>
   );
 }
@@ -537,17 +533,25 @@ export default function App() {
       try { const m = await api.startMeeting(); meetingIdRef.current = m.id; setMeetingTitle(m.title); setMeetingFolder(m.folder || ""); }
       catch { meetingIdRef.current = ""; }
       setActive(true);
-      const native = nativeStreamRef.current;   // parakeet 네이티브 토큰-스트리밍
+      // 스트리밍 가능 여부를 '시작 시점에' 백엔드에 직접 물어 권위 있게 결정(옛 ref 의존 X).
+      let native = false, interimCapable = false;
+      try {
+        const ss = await api.getSttStreaming();   // parakeet-mlx 설치 + parakeet 모델 + 다운로드 + 로컬
+        native = !!ss.available;
+        const mdls = await api.getSttModels();
+        interimCapable = status?.stt_provider !== "elevenlabs" && !!mdls?.local.find((x) => x.id === mdls.local_active)?.streaming;
+      } catch { /* 폴백: 2-pass */ }
+      streamingSttRef.current = interimCapable; nativeStreamRef.current = native;
       await start(
         onUtterance,
-        streamingSttRef.current && !native ? onInterim : null,   // 네이티브면 interim-blob 대신 ws
+        interimCapable && !native ? onInterim : null,   // 네이티브면 interim-blob 대신 ws
         source, source === "mic" ? micId || undefined : undefined,
         native ? api.sttWsUrl() : null,
         native ? setDraft : null,                                 // ws 부분결과 → 라이브 초안
       );
     }
     catch (e) { setActive(false); flash(t(captureErrKey(e))); }
-  }, [active, start, stop, onUtterance, onInterim, source, micId, t]);
+  }, [active, start, stop, onUtterance, onInterim, source, micId, t, status?.stt_provider]);
 
   // @[제목] 참조를 풀어 해당 지난 회의 요약을 쿼리에 덧붙인다.
   const resolveRefs = useCallback(async (q: string): Promise<string> => {

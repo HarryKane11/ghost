@@ -44,6 +44,7 @@ export function SettingsMenu({
   const [storagePath, setStoragePath] = useState("");
   const [sttModel, setSttModel] = useState<api.SttModel | null>(null);
   const [sttModels, setSttModels] = useState<api.SttModels | null>(null);
+  const [sttStreaming, setSttStreaming] = useState<{ available: boolean } | null>(null);
   const [customModel, setCustomModel] = useState("");
   const [glossary, setGlossaryState] = useState<api.GlossaryItem[]>([]);
   const [connIndex, setConnIndex] = useState<api.ConnectorIndex>({});
@@ -72,6 +73,7 @@ export function SettingsMenu({
     api.getStorage().then((s) => { setStorage(s); setStoragePath(s?.home || ""); });
     api.getSttModel().then(setSttModel);
     api.getSttModels().then(setSttModels);
+    api.getSttStreaming().then(setSttStreaming);
     api.getGlossary().then(setGlossaryState);
     setKeySaved(false);
   }, [open]);
@@ -91,6 +93,7 @@ export function SettingsMenu({
     await api.selectSttModel("local", id);
     setSttModels(await api.getSttModels());
     setSttModel(await api.getSttModel());
+    setSttStreaming(await api.getSttStreaming());
   };
   const pickCloudModel = async (id: string) => {
     await api.selectSttModel("cloud", id);
@@ -313,6 +316,12 @@ export function SettingsMenu({
                     {m.diarization && <span className="rounded-full bg-spark-soft px-2 py-0.5 text-[10.5px] text-spark-deep">👥 {t("settings.sttDiarization")}</span>}
                     {m.engine_ready === false && m.install && (
                       <span className="w-full text-[11px] text-[#b06a00]">{t("settings.sttNeedInstall")} <code className="rounded bg-surface px-1 font-mono">{m.install}</code></span>
+                    )}
+                    {/* 스트리밍 모델: 실제 활성 여부 + 활성화 안내 */}
+                    {m.streaming && (
+                      sttStreaming?.available
+                        ? <span className="w-full text-[11px] text-spark-deep">⚡ {t("settings.streamActive")}</span>
+                        : <span className="w-full text-[11px] text-[#b06a00]">{t("settings.streamInactive")} <code className="rounded bg-surface px-1 font-mono">uv sync --extra local</code> {t("settings.streamInactive2")}</span>
                     )}
                   </div>
                 );

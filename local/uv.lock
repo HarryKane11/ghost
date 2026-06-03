@@ -1122,6 +1122,7 @@ granite = [
 local = [
     { name = "mlx-audio" },
     { name = "mlx-whisper" },
+    { name = "parakeet-mlx" },
     { name = "soundfile" },
 ]
 streaming = [
@@ -1144,6 +1145,7 @@ requires-dist = [
     { name = "mlx-audio", marker = "extra == 'local'", specifier = ">=0.4.3" },
     { name = "mlx-whisper", marker = "extra == 'local'", specifier = ">=0.4.3" },
     { name = "openai", specifier = ">=2.38.0" },
+    { name = "parakeet-mlx", marker = "extra == 'local'", specifier = ">=0.5.1" },
     { name = "parakeet-mlx", marker = "extra == 'streaming'", specifier = ">=0.5.1" },
     { name = "peft", marker = "extra == 'granite'" },
     { name = "python-multipart", specifier = ">=0.0.29" },
