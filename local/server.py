@@ -29,27 +29,44 @@ from pydantic import BaseModel
 from ghost_local import audio, brain, memory, stt, stt_cloud, stt_cloud_stream, stt_stream, store, tts
 
 
-def _load_dotenv() -> None:
-    """local/.env (gitignore됨)에서 KEY=VALUE를 읽어 환경변수로. 시크릿은 여기에만 둔다."""
+def _config_dir():
+    """쓰기 가능한 설정 디렉터리. 프리즈된 앱은 번들이 읽기전용이라 여기에 .env를 둔다.
+    우선순위: env GHOST_CONFIG_DIR(앱이 userData로 지정) > ~/.ghost."""
     import pathlib
-    p = pathlib.Path(__file__).resolve().parent / ".env"
-    if not p.exists():
-        return
+    d = (os.environ.get("GHOST_CONFIG_DIR") or "").strip()
+    base = pathlib.Path(d) if d else (pathlib.Path.home() / ".ghost")
     try:
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-    except Exception:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception:  # noqa: BLE001
         pass
+    return base
+
+
+def _env_paths():
+    """읽을 .env 후보들: 쓰기 가능 설정 디렉터리(우선) + 소스 옆(dev 하위호환)."""
+    import pathlib
+    return [_config_dir() / ".env", pathlib.Path(__file__).resolve().parent / ".env"]
+
+
+def _load_dotenv() -> None:
+    """.env에서 KEY=VALUE를 읽어 환경변수로. 시크릿은 여기에만 둔다(gitignore)."""
+    for p in _env_paths():
+        if not p.exists():
+            continue
+        try:
+            for line in p.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _persist_env(key: str, value: str) -> None:
-    """키를 server.py 옆 .env에 영속 저장(앱 재시작 후에도 유지). 기존 키는 갱신, 나머지는 보존."""
-    import pathlib
-    p = pathlib.Path(__file__).resolve().parent / ".env"
+    """키를 쓰기 가능한 .env에 영속 저장(앱 재시작 후에도 유지). 기존 키는 갱신, 나머지는 보존."""
+    p = _config_dir() / ".env"
     try:
         lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
         out, found = [], False

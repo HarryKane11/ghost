@@ -39,10 +39,19 @@ function expectedBuild() {
 
 function backendEnv() {
   const env = { ...process.env };
-  // GUI 앱은 셸 PATH를 상속하지 않으므로 보강 (uv·ollama·codex·ffmpeg 탐색)
-  env.PATH = [...BIN_DIRS, env.PATH || ""].join(path.delimiter);
+  // GUI 앱은 셸 PATH를 상속하지 않으므로 보강. 패키징 시 동봉한 ffmpeg/ffprobe(bin)를 최우선.
+  const dirs = [...BIN_DIRS];
+  if (app.isPackaged) dirs.unshift(path.join(process.resourcesPath, "bin"));
+  env.PATH = [...dirs, env.PATH || ""].join(path.delimiter);
   env.GHOST_BUILD = expectedBuild();   // /api/health가 echo → '내 백엔드' 식별
+  env.GHOST_PORT = String(BACKEND_PORT);
+  try { env.GHOST_CONFIG_DIR = app.getPath("userData"); } catch { /* ignore */ }   // 쓰기 가능 .env 위치
   return env;
+}
+
+// 프리즈된 백엔드 실행 파일 경로(패키징 시). 있으면 Python/uv 없이 이걸 직접 띄운다.
+function frozenBackend() {
+  return path.join(process.resourcesPath, "backend", IS_WIN ? "ghost-backend.exe" : "ghost-backend");
 }
 
 /** /api/health의 version을 반환(고스트 백엔드가 아니거나 응답 없으면 null). */
@@ -156,15 +165,23 @@ async function ensureBackend() {
     console.error(`[backend] foreign/old backend on ${BACKEND_PORT} (version=${ver}, expected=${expectedBuild()}) → reclaiming`);
     await reclaimPort();
   }
-  const cwd = resolveBackendDir();
-  const uv = firstExisting(["uv"]);
-  backendProc = spawn(
-    uv,
-    ["run", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", String(BACKEND_PORT), "--log-level", "warning"],
-    { cwd, stdio: "inherit", env: backendEnv() }
-  );
+  const env = backendEnv();
+  const exe = frozenBackend();
+  if (app.isPackaged && fs.existsSync(exe)) {
+    // 프리즈된 백엔드: 사용자 PC에 Python/uv 불필요. 동봉 실행 파일을 직접 띄운다.
+    backendProc = spawn(exe, [], { cwd: path.dirname(exe), stdio: "inherit", env });
+  } else {
+    // 개발(또는 프리즈 미존재): uv로 소스 구동.
+    const cwd = resolveBackendDir();
+    const uv = firstExisting(["uv"]);
+    backendProc = spawn(
+      uv,
+      ["run", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", String(BACKEND_PORT), "--log-level", "warning"],
+      { cwd, stdio: "inherit", env }
+    );
+  }
   backendProc.on("error", (e) => console.error("[backend] spawn failed:", e.message));
-  // 첫 실행은 uv sync(의존성 다운로드)로 수 분 걸릴 수 있음 → 넉넉히 대기
+  // 첫 실행은 의존성 준비로 수 분 걸릴 수 있음(dev) → 넉넉히 대기. 프리즈는 보통 수 초.
   for (let i = 0; i < 600; i++) {
     if (await backendAlive()) return;
     await new Promise((r) => setTimeout(r, 1000));
