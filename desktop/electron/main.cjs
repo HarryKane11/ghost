@@ -74,6 +74,44 @@ function reclaimPort() {
   });
 }
 
+// 패키징 앱의 렌더러를 file:// 대신 내부 http://127.0.0.1로 서빙한다.
+// file://은 origin이 없어 YouTube IFrame 등이 거부(오류 150/152/153)하므로, dev(localhost)와
+// 동일한 진짜 http origin을 줘서 임베드가 정상 동작하게 한다.
+let rendererBase = null;
+const _MIME = {
+  ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript",
+  ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg", ".gif": "image/gif", ".ico": "image/x-icon", ".json": "application/json",
+  ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".map": "application/json", ".webmanifest": "application/manifest+json",
+};
+function startRendererServer() {
+  if (rendererBase) return Promise.resolve(rendererBase);
+  const dir = path.join(__dirname, "..", "dist");
+  return new Promise((resolve) => {
+    const srv = http.createServer((req, res) => {
+      try {
+        let p = decodeURIComponent((req.url || "/").split("?")[0]);
+        if (p === "/" || p === "") p = "/index.html";
+        let fp = path.normalize(path.join(dir, p));
+        if (!fp.startsWith(dir)) { res.statusCode = 403; return res.end(); }   // 경로 탈출 방지
+        fs.readFile(fp, (err, buf) => {
+          if (err) {   // SPA 폴백 → index.html
+            fs.readFile(path.join(dir, "index.html"), (e2, b2) => {
+              if (e2) { res.statusCode = 404; return res.end(); }
+              res.setHeader("Content-Type", "text/html; charset=utf-8"); res.end(b2);
+            });
+            return;
+          }
+          res.setHeader("Content-Type", _MIME[path.extname(fp).toLowerCase()] || "application/octet-stream");
+          res.end(buf);
+        });
+      } catch { res.statusCode = 500; res.end(); }
+    });
+    srv.on("error", () => resolve(null));
+    srv.listen(0, "127.0.0.1", () => { rendererBase = `http://127.0.0.1:${srv.address().port}`; resolve(rendererBase); });
+  });
+}
+
 /** 패키징 시 번들된 백엔드를 쓰기 가능한 위치로 복사하고 그 경로를 반환. */
 function resolveBackendDir() {
   if (!app.isPackaged) return path.join(__dirname, "..", "..", "local");
@@ -122,7 +160,7 @@ async function ensureBackend() {
   console.error("[backend] did not become healthy in time");
 }
 
-function createWindow() {
+async function createWindow() {
   win = new BrowserWindow({
     width: 1100,
     height: 720,
@@ -157,24 +195,20 @@ function createWindow() {
     { useSystemPicker: false }
   );
 
-  // YouTube 임베드(워치 모드): 패키징 앱은 file:// origin이라 IFrame 플레이어가 거부한다(오류 150/153).
-  // youtube 계열 요청에 유효한 Referer를 주입해 재생되게 한다.
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ["*://*.youtube.com/*", "*://*.youtube-nocookie.com/*", "*://*.ytimg.com/*", "*://*.googlevideo.com/*"] },
-    (details, cb) => {
-      details.requestHeaders["Referer"] = "https://www.youtube.com/";
-      cb({ requestHeaders: details.requestHeaders });
-    }
-  );
-
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http")) shell.openExternal(url);
     return { action: "deny" };
   });
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devUrl) win.loadURL(devUrl);
-  else win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+  if (devUrl) {
+    win.loadURL(devUrl);
+  } else {
+    // 패키징: file:// 대신 내부 http로 로드(진짜 origin → YouTube 임베드 정상). 실패 시 file:// 폴백.
+    const base = await startRendererServer();
+    if (base) win.loadURL(`${base}/index.html`);
+    else win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+  }
 }
 
 // 디스플레이 모드별 창 크기/always-on-top. assist=컴팩트 플로팅, full/interview=넓게.
