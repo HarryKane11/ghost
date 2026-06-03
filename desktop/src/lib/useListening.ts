@@ -11,6 +11,16 @@ const MIN_SPEECH_MS = 280;  // 너무 짧은 잡음 무시
 const MAX_UTTER_MS = 20000; // 최대 발화 길이
 const RING_SEC = 26;        // 링버퍼 길이
 
+/** 입력 PCM을 16kHz로 다운샘플(parakeet 입력용). 단순 데시메이션. */
+function downsampleTo16k(input: Float32Array, inRate: number): Float32Array {
+  if (inRate === 16000) return input;
+  const ratio = inRate / 16000;
+  const outLen = Math.floor(input.length / ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) out[i] = input[Math.floor(i * ratio)];
+  return out;
+}
+
 function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   const buf = new ArrayBuffer(44 + samples.length * 2);
   const v = new DataView(buf);
@@ -40,6 +50,10 @@ export function useListening() {
   const onUttRef = useRef<((b: Blob) => void) | null>(null);
   const onInterimRef = useRef<((b: Blob) => void) | null>(null);
   const interimMsRef = useRef(0);
+  // 네이티브 토큰-스트리밍(parakeet ws). 있으면 interim-blob 대신 ws 부분결과를 쓴다.
+  const wsRef = useRef<WebSocket | null>(null);
+  const onPartialRef = useRef<((text: string) => void) | null>(null);
+  const streamUrlRef = useRef<string | null>(null);
 
   // 링버퍼
   const ringRef = useRef<Float32Array | null>(null);
@@ -68,6 +82,10 @@ export function useListening() {
   }, []);
 
   const finalize = useCallback(() => {
+    // 네이티브 스트리밍: 엔드포인트를 디코더에 알린다(현재 가설 확정). 최종 정제는 배치가 담당.
+    if (wsRef.current?.readyState === 1) {
+      try { wsRef.current.send('{"final":true}'); } catch { /* ignore */ }
+    }
     const rate = rateRef.current;
     const tail = Math.floor((TAIL_MS / 1000) * rate);
     const toAbs = writtenRef.current + 0; // 종료 시점 (침묵 포함되어 tail 충분하지만 약간 더)
@@ -96,6 +114,12 @@ export function useListening() {
     const rms = Math.sqrt(sum / n);
     setLevel((l) => l * 0.6 + Math.min(1, rms * 9) * 0.4);
 
+    // 네이티브 스트리밍: 매 프레임을 16k로 다운샘플해 ws로 흘린다(디코더는 연속 오디오를 원함).
+    const ws = wsRef.current;
+    if (ws && ws.readyState === 1) {
+      try { ws.send(downsampleTo16k(input, rateRef.current).buffer); } catch { /* ignore */ }
+    }
+
     const frameMs = (n / rateRef.current) * 1000;
     const startThresh = Math.max(0.016, noiseRef.current * 2.5);
     const endThresh = Math.max(0.010, noiseRef.current * 1.5);
@@ -119,8 +143,8 @@ export function useListening() {
       speechMsRef.current += frameMs;
       if (rms < endThresh) silenceMsRef.current += frameMs;
       else silenceMsRef.current = 0;
-      // 발화 중 주기적 '초안' 전사 — 스트리밍 느낌(엔드포인트에서 최종으로 교체).
-      if (onInterimRef.current) {
+      // 발화 중 주기적 '초안' 전사 — 단, 네이티브 ws 스트리밍이 켜져 있으면 그쪽이 초안을 담당.
+      if (onInterimRef.current && !wsRef.current) {
         interimMsRef.current += frameMs;
         if (interimMsRef.current >= INTERIM_MS) {
           interimMsRef.current = 0;
@@ -163,6 +187,24 @@ export function useListening() {
     ringRef.current = new Float32Array(Math.ceil(RING_SEC * ctx.sampleRate));
     writtenRef.current = 0;
 
+    // 네이티브 스트리밍 ws (parakeet). 실패해도 무시 → 2-pass 배치로 폴백.
+    if (streamUrlRef.current && onPartialRef.current) {
+      try {
+        const ws = new WebSocket(streamUrlRef.current);
+        ws.binaryType = "arraybuffer";
+        ws.onmessage = (e) => {
+          try {
+            const d = JSON.parse(e.data);
+            if (d.error) { ws.close(); wsRef.current = null; return; }  // 미지원 → 폴백
+            if (typeof d.text === "string") onPartialRef.current?.(d.text);
+          } catch { /* ignore */ }
+        };
+        ws.onclose = () => { if (wsRef.current === ws) wsRef.current = null; };
+        ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } if (wsRef.current === ws) wsRef.current = null; };
+        wsRef.current = ws;
+      } catch { wsRef.current = null; }
+    }
+
     const srcNode = ctx.createMediaStreamSource(stream);
     srcNodeRef.current = srcNode;
     const proc = ctx.createScriptProcessor(2048, 1, 1);
@@ -176,9 +218,12 @@ export function useListening() {
   }, [onAudio]);
 
   const start = useCallback(
-    async (onUtterance: (b: Blob) => void, onInterim: ((b: Blob) => void) | null, source: Source = "mic", deviceId?: string) => {
+    async (onUtterance: (b: Blob) => void, onInterim: ((b: Blob) => void) | null, source: Source = "mic", deviceId?: string,
+           streamUrl?: string | null, onPartial?: ((text: string) => void) | null) => {
       onUttRef.current = onUtterance;
       onInterimRef.current = onInterim;   // null이면 초안(interim) 비활성
+      streamUrlRef.current = streamUrl || null;   // 있으면 네이티브 ws 스트리밍
+      onPartialRef.current = onPartial || null;
       inSpeechRef.current = false;
       startFramesRef.current = 0;
       silenceMsRef.current = 0;
@@ -190,6 +235,8 @@ export function useListening() {
   );
 
   const stop = useCallback(() => {
+    try { wsRef.current?.close(); } catch {}
+    wsRef.current = null;
     try { procRef.current?.disconnect(); } catch {}
     try { srcNodeRef.current?.disconnect(); } catch {}
     try { ctxRef.current?.close(); } catch {}

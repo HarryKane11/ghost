@@ -19,12 +19,14 @@ import threading
 import uuid
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form
+import asyncio
+
+from fastapi import FastAPI, UploadFile, File, Form, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from ghost_local import brain, memory, stt, stt_cloud, store, tts
+from ghost_local import brain, memory, stt, stt_cloud, stt_stream, store, tts
 
 
 def _load_dotenv() -> None:
@@ -584,6 +586,59 @@ class GlossaryReq(BaseModel):
 @app.post("/api/glossary")
 def set_glossary_ep(req: GlossaryReq) -> dict:
     return {"ok": True, "glossary": store.set_glossary(req.glossary)}
+
+
+@app.get("/api/stt/streaming")
+def stt_streaming() -> dict:
+    """현재 모델이 네이티브 토큰-스트리밍 가능한지(parakeet-mlx 설치 + parakeet 모델 + 다운로드됨)."""
+    mid = stt.active_model()
+    ok = (STATE.get("stt_provider") != "elevenlabs"
+          and stt_stream.streaming_supported(mid)
+          and stt.model_present(mid))
+    return {"available": ok, "model": mid}
+
+
+@app.websocket("/ws/stt")
+async def ws_stt(ws: WebSocket) -> None:
+    """연속 오디오(16k mono float32, binary) → parakeet 스트리밍 → 부분 결과를 실시간으로 돌려준다.
+
+    바이너리 프레임 = 오디오. 텍스트 '{"final":true}' = 엔드포인트(현재 가설 확정). 최종 정제 라인은
+    클라이언트의 배치 전사가 따로 담당하므로, 여기선 라이브 초안만 보낸다.
+    """
+    await ws.accept()
+    import numpy as np
+    loop = asyncio.get_running_loop()
+    repo = stt._repo(stt.active_model())
+
+    def emit(text: str, final: bool) -> None:
+        try:
+            asyncio.run_coroutine_threadsafe(ws.send_json({"text": text, "final": final}), loop)
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not stt_stream.streaming_supported(stt.active_model()):
+        await ws.send_json({"text": "", "final": True, "error": "현재 모델은 네이티브 스트리밍 미지원"})
+        await ws.close()
+        return
+    sess = stt_stream.make_session(repo, emit)
+    if sess is None:
+        await ws.send_json({"text": "", "final": True, "error": "parakeet-mlx 미설치"})
+        await ws.close()
+        return
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+            b = msg.get("bytes")
+            if b:
+                sess.feed(np.frombuffer(b, dtype=np.float32).copy())
+            elif msg.get("text") and "final" in msg["text"]:
+                sess.finalize()
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        sess.close()
 
 
 @app.get("/api/stt/models")

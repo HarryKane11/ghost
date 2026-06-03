@@ -207,6 +207,7 @@ export default function App() {
   const [draft, setDraft] = useState("");          // 발화 중 라이브 초안(스트리밍 느낌) → 엔드포인트에서 최종으로 교체
   const [streamingStt, setStreamingStt] = useState(false);  // 활성 STT가 스트리밍 지원(로컬)
   const streamingSttRef = useRef(false);
+  const nativeStreamRef = useRef(false);   // parakeet ws 네이티브 토큰-스트리밍 가능
   const interimBusyRef = useRef(false);
   const [scriptParas, setScriptParas] = useState<api.ScriptParagraph[]>([]);
   const [scriptLoading, setScriptLoading] = useState(false);
@@ -270,6 +271,7 @@ export default function App() {
     const m = await api.getSttModels();
     const on = status?.stt_provider !== "elevenlabs" && !!m?.local.find((x) => x.id === m.local_active)?.streaming;
     setStreamingStt(on); streamingSttRef.current = on;
+    nativeStreamRef.current = on && (await api.getSttStreaming()).available;  // parakeet ws 가능 여부
   }, [status?.stt_provider]);
   useEffect(() => { refreshStreamingStt(); }, [refreshStreamingStt, menuOpen]);
   // 인터뷰 모드: 번역 안 된 전사 줄을 하나씩 순차 번역(언어별 캐시).
@@ -535,7 +537,14 @@ export default function App() {
       try { const m = await api.startMeeting(); meetingIdRef.current = m.id; setMeetingTitle(m.title); setMeetingFolder(m.folder || ""); }
       catch { meetingIdRef.current = ""; }
       setActive(true);
-      await start(onUtterance, streamingSttRef.current ? onInterim : null, source, source === "mic" ? micId || undefined : undefined);
+      const native = nativeStreamRef.current;   // parakeet 네이티브 토큰-스트리밍
+      await start(
+        onUtterance,
+        streamingSttRef.current && !native ? onInterim : null,   // 네이티브면 interim-blob 대신 ws
+        source, source === "mic" ? micId || undefined : undefined,
+        native ? api.sttWsUrl() : null,
+        native ? setDraft : null,                                 // ws 부분결과 → 라이브 초안
+      );
     }
     catch (e) { setActive(false); flash(t(captureErrKey(e))); }
   }, [active, start, stop, onUtterance, onInterim, source, micId, t]);

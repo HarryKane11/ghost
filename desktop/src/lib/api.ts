@@ -281,6 +281,10 @@ export async function setGlossary(items: GlossaryItem[]): Promise<GlossaryItem[]
 
 export type SttModelOption = { id: string; label: string; lang?: string; approx_gb?: number; engine?: string; streaming?: boolean; diarization?: boolean; engine_ready?: boolean; install?: string };
 export type SttModels = { local: SttModelOption[]; local_active: string; cloud: SttModelOption[]; cloud_active: string };
+export function sttWsUrl(): string { return BASE.replace(/^http/, "ws") + "/ws/stt"; }
+export async function getSttStreaming(): Promise<{ available: boolean; model?: string }> {
+  try { return await (await fetch(`${BASE}/api/stt/streaming`)).json(); } catch { return { available: false }; }
+}
 export async function getSttModels(): Promise<SttModels | null> {
   try { return await (await fetch(`${BASE}/api/stt/models`)).json(); } catch { return null; }
 }
