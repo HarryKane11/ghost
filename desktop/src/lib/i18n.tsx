@@ -148,6 +148,7 @@ const DICT: Record<string, Record<Lang, string>> = {
   "settings.meetingsTitle": { ko: "회의 내역", en: "Meeting history", zh: "会议记录" },
   "settings.meetingsEmpty": { ko: "아직 생성된 회의록이 없습니다.", en: "No minutes yet.", zh: "暂无纪要。" },
   "settings.meetingNoMinutes": { ko: "회의록이 아직 없어요. 요약만 표시합니다.", en: "No minutes yet — showing summary.", zh: "暂无纪要，仅显示摘要。" },
+  "settings.pipeTtsOptional": { ko: "TTS (선택)", en: "TTS (optional)", zh: "TTS（可选）" },
   "settings.indexBtn": { ko: "인덱싱", en: "Index", zh: "索引" },
   "settings.indexing": { ko: "인덱싱 중…", en: "Indexing…", zh: "索引中…" },
   "settings.indexed": { ko: "인덱싱됨", en: "Indexed", zh: "已索引" },

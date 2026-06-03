@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines } from "lucide-react";
+import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines, Volume2, ChevronRight, Download } from "lucide-react";
 import * as api from "@/lib/api";
 import type { Spec } from "@/components/GenUI";
 import { BrandIcon, hasBrand, EntityIcon, hasEntityIcon } from "@/components/BrandIcon";
@@ -164,6 +164,36 @@ export function SettingsMenu({
           </div>
         </div>
 
+        {/* 파이프라인 플로우 — STT → Agent → TTS(선택) */}
+        {(() => {
+          const sttM = sttModels?.local.find((x) => x.id === sttModels.local_active);
+          const sttName = sttM?.label?.split(" · ")[0] || (sttModels?.local_active || "").split("/").pop() || "STT";
+          const sttReady = sttModel?.present && (sttM?.engine_ready !== false);
+          const Stage = ({ icon, label, value, ok, accent }: { icon: React.ReactNode; label: string; value: string; ok?: boolean | null; accent?: boolean }) => (
+            <div className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-xl border px-3 py-2.5", accent ? "border-spark-soft bg-spark-soft/30" : "border-hairline bg-surface-soft")}>
+              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-canvas text-steel">{icon}</span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-stone">{label}
+                  {ok === true && <span className="size-1.5 rounded-full bg-spark" />}
+                  {ok === false && <span className="size-1.5 rounded-full bg-[#e0a23a]" />}
+                </div>
+                <div className="truncate text-[12px] font-medium text-charcoal">{value}</div>
+              </div>
+            </div>
+          );
+          return (
+            <div className="mb-4 flex items-stretch gap-1">
+              <Stage icon={<AudioLines className="size-4" />} label="STT" value={sttModels ? sttName : "…"} ok={sttModels ? !!sttReady : null}
+                accent />
+              <div className="flex shrink-0 items-center text-stone"><ChevronRight className="size-4" /></div>
+              <Stage icon={status?.backend ? <BrandIcon name={status.backend} size={16} /> : <Code className="size-4" />} label="Agent"
+                value={status?.backend_label || "…"} ok={status ? (status.backend !== "codex" || status.codex_logged_in) : null} />
+              <div className="flex shrink-0 items-center text-stone"><ChevronRight className="size-4" /></div>
+              <Stage icon={<Volume2 className="size-4" />} label={t("settings.pipeTtsOptional")} value="Supertonic" ok={null} />
+            </div>
+          );
+        })()}
+
         {/* 언어 */}
         <Section icon={<Languages className="size-4 text-steel" />} title={t("settings.language")}>
           <div className="flex items-center gap-1.5">
@@ -278,6 +308,21 @@ export function SettingsMenu({
                   </div>
                 );
               })()}
+              {/* 선택한 모델 미다운로드 → 바로 다운로드 */}
+              {sttModel && !sttModel.present && (sttModels?.local.find((x) => x.id === sttModels.local_active)?.engine_ready !== false) && (
+                <div className="mt-2">
+                  {sttModel.state === "downloading" ? (
+                    <div>
+                      <div className="h-2 overflow-hidden rounded-full bg-surface"><div className="h-full rounded-full bg-spark transition-all" style={{ width: `${sttModel.percent}%` }} /></div>
+                      <div className="mt-1 text-[11px] text-stone">{t("settings.modelDownloading")} {gb(sttModel.downloaded)} / {gb(sttModel.total)} ({sttModel.percent}%)</div>
+                    </div>
+                  ) : (
+                    <button onClick={downloadModel} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-medium text-canvas">
+                      <Download className="size-3.5" /> {t("settings.modelDownload")} (~{gb(sttModel.total)})
+                    </button>
+                  )}
+                </div>
+              )}
               <p className="mt-1.5 text-[11px] leading-relaxed text-stone">{t("settings.sttModelDesc")}</p>
             </div>
           )}
