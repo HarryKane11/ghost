@@ -104,15 +104,25 @@ def install_engine(target: str) -> dict:
     _INSTALL.update(state="installing", target=target, error=None)
 
     def _w():
+        # 실행 중인 '바로 그 venv'(sys.executable)에 설치 — DMG에선 userData/backend/.venv(쓰기 가능).
+        # cwd·VIRTUAL_ENV에 의존하지 않게 --python으로 정확히 타깃.
+        attempts = [
+            ["uv", "pip", "install", "--python", sys.executable, *pkgs],
+            [sys.executable, "-m", "pip", "install", *pkgs],   # uv 없을 때 폴백
+        ]
+        last_err = "설치 실패"
         try:
-            r = subprocess.run(["uv", "pip", "install", *pkgs], capture_output=True, text=True, timeout=2400)
-            if r.returncode != 0:
-                r = subprocess.run([sys.executable, "-m", "pip", "install", *pkgs], capture_output=True, text=True, timeout=2400)
-            if r.returncode != 0:
-                _INSTALL.update(state="error", error=(r.stderr or "설치 실패")[-400:])
-                return
-            importlib.invalidate_caches()   # 새로 깐 패키지를 find_spec/import가 인식
-            _INSTALL.update(state="done", error=None)
+            for cmd in attempts:
+                try:
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=2400)
+                except FileNotFoundError:
+                    continue   # uv 미존재 → 다음 폴백
+                if r.returncode == 0:
+                    importlib.invalidate_caches()   # 새 패키지를 find_spec/import가 인식
+                    _INSTALL.update(state="done", error=None)
+                    return
+                last_err = (r.stderr or last_err)[-400:]
+            _INSTALL.update(state="error", error=last_err)
         except Exception as ex:  # noqa: BLE001
             _INSTALL.update(state="error", error=str(ex))
 
