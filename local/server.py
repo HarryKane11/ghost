@@ -939,13 +939,20 @@ async def audio_transcribe(audio_file: UploadFile = File(...)) -> dict:
 class AudioMinutesReq(BaseModel):
     segments: list = []   # [{start, end, text}]
     context: str = ""
+    lang: str = ""        # 회의록 출력 언어(빈값이면 현재 설정 언어). 입력 음성 언어와 무관하게 적용.
 
 
 @app.post("/api/audio/minutes/stream")
 def audio_minutes_stream(req: AudioMinutesReq) -> StreamingResponse:
-    """타임스탬프 전사 → AI 백엔드로 상세 회의록(각 항목에 [mm:ss] 인용) 생성."""
+    """타임스탬프 전사 → AI 백엔드로 상세 회의록(각 항목에 [mm:ss] 인용) 생성. lang으로 출력 언어 강제."""
     cfg = _cfg()
     label = BACKEND_LABEL[STATE["backend"]]
+    # 출력 언어 강제 — 입력 음성 언어와 무관하게 사용자가 고른 언어로 회의록 작성.
+    system = brain.MINUTES_TS_SYSTEM
+    if req.lang:
+        name = _LANG_NAME.get(req.lang, req.lang)
+        system += (f"\n\n[출력 언어 — 매우 중요] 입력 음성이 어떤 언어든, 회의록의 모든 텍스트"
+                   f"(title·heading·내용)를 반드시 {name}로 작성한다. 단, 타임스탬프 [mm:ss]는 그대로 둔다.")
     # 전사를 [mm:ss] text 줄로 직렬화 → 모델이 시각을 인용할 수 있게.
     lines = []
     for s in (req.segments or []):
@@ -959,7 +966,7 @@ def audio_minutes_stream(req: AudioMinutesReq) -> StreamingResponse:
             return
         try:
             for kind, payload in brain.minutes_stream(transcript, cfg, context=req.context,
-                                                      system=brain.MINUTES_TS_SYSTEM, with_image=False):
+                                                      system=system, with_image=False):
                 if kind == "progress":
                     yield _sse("progress", payload if isinstance(payload, dict) else {"text": payload})
                 elif kind == "result":

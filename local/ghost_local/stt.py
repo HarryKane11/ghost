@@ -242,12 +242,19 @@ def _transcribe_impl(audio_path: str, model_id: str) -> str:
         import torchaudio
         proc, model = _granite(repo)
         wav, sr = torchaudio.load(audio_path)
+        if wav.shape[0] > 1:                       # 멀티채널 → 모노
+            wav = wav.mean(dim=0, keepdim=True)
         if sr != 16000:
             wav = torchaudio.functional.resample(wav, sr, 16000)
-        inputs = proc(wav, return_tensors="pt", sampling_rate=16000)
+        # Granite Speech는 chat-template + <|audio|> placeholder 기반 멀티모달 LLM이다.
+        chat = [{"role": "user", "content": "<|audio|>Transcribe this speech to text."}]
+        text = proc.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+        inputs = proc(text, wav, return_tensors="pt")
         with torch.no_grad():
-            out = model.generate(**inputs, max_new_tokens=256)
-        return proc.batch_decode(out, skip_special_tokens=True)[0].strip()
+            out = model.generate(**inputs, max_new_tokens=256, num_beams=1, do_sample=False)
+        n_in = inputs["input_ids"].shape[-1]       # 입력 토큰 이후(생성분)만 디코드
+        new_tokens = out[:, n_in:]
+        return proc.tokenizer.batch_decode(new_tokens, skip_special_tokens=True)[0].strip()
     return ""
 
 

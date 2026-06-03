@@ -419,8 +419,8 @@ export async function uploadAudio(file: File, onProgress?: (pct: number) => void
     xhr.send(fd);
   });
 }
-export function streamAudioMinutes(segments: AudioSegment[], context: string, h: StreamHandlers) {
-  return streamSSE("/api/audio/minutes/stream", { segments, context }, h);
+export function streamAudioMinutes(segments: AudioSegment[], context: string, h: StreamHandlers, lang = "") {
+  return streamSSE("/api/audio/minutes/stream", { segments, context, lang }, h);
 }
 
 export async function ttsUrl(text: string): Promise<string> {

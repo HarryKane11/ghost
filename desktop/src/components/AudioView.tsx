@@ -1,7 +1,9 @@
 import { useRef, useState } from "react";
-import { X, FileAudio, Upload, Loader2, FileText, Play } from "lucide-react";
+import { X, FileAudio, Upload, Loader2, FileText, Play, Globe, ChevronDown } from "lucide-react";
 import * as api from "@/lib/api";
 import { GenUI, type Spec } from "@/components/GenUI";
+import { GhostLogo } from "@/components/GhostLogo";
+import { ModelPicker } from "@/components/ModelPicker";
 import { cn } from "@/lib/cn";
 
 const fmt = (s: number) => {
@@ -18,18 +20,24 @@ type Phase = "empty" | "transcribing" | "ready" | "error";
  */
 export function AudioView({
   open, onClose, isMac = false, t,
+  provider, models, onPickModel, transLangs, lang,
 }: {
   open: boolean;
   onClose: () => void;
   isMac?: boolean;
   t: (k: string) => string;
+  provider?: string;
+  models: api.SttModels | null;
+  onPickModel: (kind: "local" | "cloud", id: string) => void;
+  transLangs: api.TransLang[];
+  lang: string;
 }) {
+  const [outLang, setOutLang] = useState(lang || "ko");   // 회의록 출력 언어(입력 음성과 무관)
   const [phase, setPhase] = useState<Phase>("empty");
   const [fileName, setFileName] = useState("");
   const [audioUrl, setAudioUrl] = useState<string>("");
   const [segments, setSegments] = useState<api.AudioSegment[]>([]);
   const [upPct, setUpPct] = useState(0);
-  const [engine, setEngine] = useState("");
   const [minutes, setMinutes] = useState<Spec | null>(null);
   const [minBusy, setMinBusy] = useState(false);
   const [minProgress, setMinProgress] = useState<string>("");
@@ -59,7 +67,6 @@ export function AudioView({
       const r = await api.uploadAudio(file, setUpPct);
       if (!r.ok || !r.segments?.length) { setPhase("error"); setErr(t("audio.noText")); return; }
       setSegments(r.segments);
-      setEngine((r.model || "").split("/").pop() || r.provider || "");
       setPhase("ready");
     } catch (e) {
       setPhase("error"); setErr(String(e));
@@ -73,17 +80,25 @@ export function AudioView({
       onProgress: (p) => setMinProgress(p.text || ""),
       onResult: (spec) => { setMinutes(spec); setMinBusy(false); },
       onError: () => { setMinBusy(false); setMinProgress(t("audio.minutesFail")); },
-    });
+    }, outLang);   // 출력 언어 강제
   };
+  const langs = transLangs.length ? transLangs : [{ code: "ko", name: "Korean", label: "한국어" }, { code: "en", name: "English", label: "English" }] as api.TransLang[];
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas">
-      {/* 상단 바 */}
+      {/* 상단 바 — 라이브와 동일 톤: 로고(→홈) · 모델 · 출력 언어 · 액션 */}
       <div className="flex items-center gap-2 border-b border-hairline px-4 py-2.5" style={{ ...DRAG, paddingLeft: isMac ? 84 : undefined }}>
-        <button style={NODRAG} onClick={onClose} title={t("admin.back")} className="grid size-8 shrink-0 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground"><X className="size-4.5" /></button>
-        <FileAudio className="size-4 shrink-0 text-spark-deep" />
+        <button style={NODRAG} onClick={onClose} title={t("header.home")} className="flex shrink-0 items-center gap-2 rounded-lg px-1 py-0.5 hover:bg-surface"><GhostLogo variant="icon" size={20} className="rounded-md" /><span className="text-[13px] font-semibold tracking-tight">Ghost</span></button>
+        <span style={NODRAG}><FileAudio className="size-4 shrink-0 text-spark-deep" /></span>
         <span className="min-w-0 flex-1 truncate text-[13px] text-charcoal">{fileName || t("audio.title")}</span>
-        {engine && <span className="shrink-0 rounded-full border border-hairline px-2 py-0.5 text-[11px] text-stone">{engine}</span>}
+        <span style={NODRAG}><ModelPicker provider={provider} models={models} onPick={onPickModel} t={t} /></span>
+        {/* 회의록 출력 언어 */}
+        <span style={NODRAG} className="inline-flex items-center gap-1 rounded-full border border-hairline bg-surface px-1.5 py-0.5 text-[11px] text-steel">
+          <Globe className="size-3 text-stone" />
+          <select value={outLang} onChange={(e) => setOutLang(e.target.value)} title={t("audio.outLang")} className="bg-transparent text-[11px] text-steel outline-none">
+            {langs.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+          </select>
+        </span>
         {phase !== "empty" && (
           <button style={NODRAG} onClick={() => fileRef.current?.click()} className="h-8 shrink-0 rounded-lg border border-hairline px-3 text-[12px] font-medium text-steel hover:text-foreground">{t("audio.another")}</button>
         )}

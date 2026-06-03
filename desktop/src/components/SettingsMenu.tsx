@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines, Volume2, ChevronRight, ChevronLeft, Download, Search, Gauge, Type, Cpu, Sparkles } from "lucide-react";
+import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines, Volume2, ChevronRight, ChevronLeft, Download, Search, Gauge, Type, Cpu, Sparkles, PanelLeftClose } from "lucide-react";
 import * as api from "@/lib/api";
 import type { Spec } from "@/components/GenUI";
 import { BrandIcon, hasBrand, EntityIcon, hasEntityIcon } from "@/components/BrandIcon";
@@ -37,6 +37,7 @@ export function SettingsMenu({
   const page = variant === "page";
   const [mq, setMq] = useState("");   // 회의 아카이브 검색어(page 변형)
   const [nav, setNav] = useState("usage");   // 관리자 좌측 사이드바 선택 그룹
+  const [navCollapsed, setNavCollapsed] = useState(false);   // 사이드바 접기
   const { t, lang, setLang } = useT();
   // 좌측 사이드바 네비게이션 그룹(page 변형 전용)
   const NAV: { id: string; label: string; icon: React.ReactNode }[] = [
@@ -201,23 +202,27 @@ export function SettingsMenu({
         : "fixed inset-0 z-50 flex items-start justify-center bg-ink/20 backdrop-blur-sm"}
       onClick={page ? undefined : onClose}
     >
-      {/* 관리자: 좌측 고정 사이드바 네비게이션 */}
+      {/* 관리자: 좌측 고정 사이드바 네비게이션 (접기 가능) */}
       {page && (
-        <aside className="fixed inset-y-0 left-0 z-[51] flex w-[224px] flex-col border-r border-hairline bg-surface-soft/50">
-          <div className="flex items-center gap-2 px-4 py-3.5 text-[13px] font-semibold tracking-tight text-foreground" style={{ paddingLeft: isMac ? 84 : undefined }}>
+        <aside className={cn("fixed inset-y-0 left-0 z-[51] flex flex-col border-r border-hairline bg-surface-soft/50 transition-[width]", navCollapsed ? "w-[60px]" : "w-[224px]")}>
+          <div className="flex items-center gap-2 px-2 py-3.5 text-[13px] font-semibold tracking-tight text-foreground" style={{ paddingLeft: isMac ? 84 : undefined }}>
             <button onClick={onClose} className="grid size-7 shrink-0 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground" title={t("admin.back")}><ChevronLeft className="size-4" /></button>
-            {t("admin.title")}
+            {!navCollapsed && <span className="flex-1 truncate">{t("admin.title")}</span>}
+            <button onClick={() => setNavCollapsed((v) => !v)} className="grid size-7 shrink-0 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground" title={navCollapsed ? "펼치기" : "접기"}>
+              {navCollapsed ? <ChevronRight className="size-4" /> : <PanelLeftClose className="size-4" />}
+            </button>
           </div>
           <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
             {NAV.map((n) => (
-              <button key={n.id} onClick={() => setNav(n.id)}
-                className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium transition-colors",
+              <button key={n.id} onClick={() => setNav(n.id)} title={n.label}
+                className={cn("flex w-full items-center gap-2.5 rounded-lg py-2 text-left text-[12.5px] font-medium transition-colors",
+                  navCollapsed ? "justify-center px-0" : "px-2.5",
                   nav === n.id ? "bg-ink text-canvas" : "text-steel hover:bg-surface hover:text-foreground")}>
-                {n.icon}{n.label}
+                {n.icon}{!navCollapsed && n.label}
               </button>
             ))}
           </nav>
-          {onReplayGuide && (
+          {onReplayGuide && !navCollapsed && (
             <button onClick={onReplayGuide} className="m-2 inline-flex items-center justify-center gap-1.5 rounded-lg border border-hairline px-2.5 py-2 text-[12px] text-steel hover:bg-surface hover:text-foreground">
               <Compass className="size-3.5" /> {t("settings.replayGuide")}
             </button>
@@ -226,7 +231,7 @@ export function SettingsMenu({
       )}
       <div
         className={page
-          ? "w-full flex-1 overflow-y-auto py-5 pl-[248px] pr-7"
+          ? cn("w-full flex-1 overflow-y-auto py-5 pr-7 transition-[padding]", navCollapsed ? "pl-[84px]" : "pl-[248px]")
           : "mt-16 max-h-[80vh] w-[560px] overflow-y-auto rounded-2xl border border-hairline bg-canvas p-5 shadow-2xl"}
         onClick={(e) => e.stopPropagation()}
       >

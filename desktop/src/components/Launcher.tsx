@@ -1,10 +1,10 @@
-import { Radio, MonitorPlay, FileAudio, ArrowRight } from "lucide-react";
+import { Radio, MonitorPlay, FileAudio, ArrowRight, Settings, HelpCircle } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 
 export type LaunchMode = "live" | "watch" | "audio";
 
 /** 진입 런처 — 매 실행 시 3가지 모드 중 선택. macOS는 상단 신호등 영역을 드래그 가능하게 비운다. */
-export function Launcher({ onSelect, isMac = false, t }: { onSelect: (m: LaunchMode) => void; isMac?: boolean; t: (k: string) => string }) {
+export function Launcher({ onSelect, onSettings, onHelp, isMac = false, t }: { onSelect: (m: LaunchMode) => void; onSettings?: () => void; onHelp?: () => void; isMac?: boolean; t: (k: string) => string }) {
   const DRAG = { WebkitAppRegion: "drag" } as any;
   const NODRAG = { WebkitAppRegion: "no-drag" } as any;
 
@@ -16,7 +16,12 @@ export function Launcher({ onSelect, isMac = false, t }: { onSelect: (m: LaunchM
 
   return (
     <div className="flex h-full flex-col bg-canvas">
-      <div className="h-10 shrink-0" style={{ ...DRAG, paddingLeft: isMac ? 84 : undefined }} />
+      <div className="flex h-12 shrink-0 items-center justify-end gap-1 px-3" style={{ ...DRAG, paddingLeft: isMac ? 84 : undefined }}>
+        <div style={NODRAG} className="flex items-center gap-1">
+          {onHelp && <button onClick={onHelp} title={t("header.help")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><HelpCircle className="size-4" /></button>}
+          {onSettings && <button onClick={onSettings} title={t("header.settings")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><Settings className="size-4" /></button>}
+        </div>
+      </div>
       <div className="flex flex-1 flex-col items-center justify-center px-6" style={NODRAG}>
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <GhostLogo variant="icon" size={48} className="rounded-2xl" />

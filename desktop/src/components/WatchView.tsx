@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
-import { X, MonitorPlay, Ear, Square, Send, Languages } from "lucide-react";
+import { X, MonitorPlay, Mic, MonitorSpeaker, Ear, Square, Send, Languages } from "lucide-react";
+import * as api from "@/lib/api";
 import type { TransLang } from "@/lib/api";
 import { GhostLogo } from "@/components/GhostLogo";
+import { ModelPicker } from "@/components/ModelPicker";
 import { GenUI, type Spec } from "@/components/GenUI";
 import { cn } from "@/lib/cn";
 
@@ -42,11 +44,17 @@ export function WatchView({
   open, onClose, active, onToggleListen,
   transcript, translations, transLang, setTransLang, transLangs,
   draft, cards, onAsk, t, isMac = false,
+  provider, models, onPickModel, source, setSource,
 }: {
   open: boolean;
   onClose: () => void;
   active: boolean;
   onToggleListen: () => void;
+  provider?: string;
+  models?: api.SttModels | null;
+  onPickModel?: (kind: "local" | "cloud", id: string) => void;
+  source?: "mic" | "system";
+  setSource?: (s: "mic" | "system") => void;
   transcript: Line[];
   translations: Record<string, string>;
   transLang: string;
@@ -78,10 +86,10 @@ export function WatchView({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas">
-      {/* 상단 바: 닫기 · URL · 듣기 토글. macOS는 신호등(닫기 버튼)과 안 겹치게 왼쪽 여백 + 드래그 영역. */}
+      {/* 상단 바 — 라이브와 동일 톤: 로고(→홈) · URL · 모델 · 소스 · 듣기. macOS 신호등 회피 여백. */}
       <div className="flex items-center gap-2 border-b border-hairline px-4 py-2.5" style={{ ...DRAG, paddingLeft: isMac ? 84 : undefined }}>
-        <button style={NODRAG} onClick={onClose} title={t("admin.back")} className="grid size-8 shrink-0 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground"><X className="size-4.5" /></button>
-        <MonitorPlay className="size-4 shrink-0 text-[#ff0033]" />
+        <button style={NODRAG} onClick={onClose} title={t("header.home")} className="flex shrink-0 items-center gap-2 rounded-lg px-1 py-0.5 hover:bg-surface"><GhostLogo variant="icon" size={20} className="rounded-md" /><span className="text-[13px] font-semibold tracking-tight">Ghost</span></button>
+        <span style={NODRAG}><MonitorPlay className="size-4 shrink-0 text-[#ff0033]" /></span>
         <input
           style={NODRAG}
           value={url} onChange={(e) => setUrl(e.target.value)}
@@ -90,6 +98,17 @@ export function WatchView({
           className="h-8 min-w-0 flex-1 rounded-lg border border-hairline bg-surface-soft px-3 text-[12.5px] text-charcoal outline-none placeholder:text-stone focus:border-ink/40"
         />
         <button style={NODRAG} onClick={loadUrl} className="h-8 shrink-0 rounded-lg border border-hairline px-3 text-[12px] font-medium text-steel hover:text-foreground">{t("watch.load")}</button>
+        {models && onPickModel && <span style={NODRAG}><ModelPicker provider={provider} models={models} onPick={onPickModel} disabled={active} t={t} /></span>}
+        {setSource && (
+          <div style={NODRAG} className="flex shrink-0 items-center rounded-full border border-hairline bg-surface-soft p-0.5">
+            {([["system", t("trans.system")], ["mic", t("trans.mic")]] as const).map(([s, label]) => (
+              <button key={s} disabled={active} onClick={() => setSource(s)} title={label}
+                className={cn("inline-flex h-6 items-center gap-1 rounded-full px-2 text-[11px] font-medium transition-colors disabled:opacity-50", source === s ? "bg-ink text-canvas" : "text-steel hover:text-foreground")}>
+                {s === "mic" ? <Mic className="size-3" /> : <MonitorSpeaker className="size-3" />}{label}
+              </button>
+            ))}
+          </div>
+        )}
         <button style={NODRAG} onClick={onToggleListen}
           className={cn("inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors",
             active ? "bg-[#d05757] text-white" : "bg-ink text-canvas")}>

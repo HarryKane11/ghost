@@ -12,6 +12,7 @@ import { GenUI, type Spec } from "@/components/GenUI";
 import { SettingsMenu } from "@/components/SettingsMenu";
 import { WatchView } from "@/components/WatchView";
 import { AudioView } from "@/components/AudioView";
+import { ModelPicker } from "@/components/ModelPicker";
 import { Launcher, type LaunchMode } from "@/components/Launcher";
 import { loadAppFont } from "@/components/FontSettings";
 import { Onboarding } from "@/components/Onboarding";
@@ -199,8 +200,7 @@ export default function App() {
   const [micId, setMicId] = usePref<string>("ghost.micId", "");
   const [tq, setTq] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(false);   // 전사 도구 더보기(⋯) 메뉴
-  const [modelPickOpen, setModelPickOpen] = useState(false);   // 파형 옆 모델 선택
+  const [toolsOpen, setToolsOpen] = useState(false);   // 전사 옵션 메뉴
   const [sttModelsList, setSttModelsList] = useState<api.SttModels | null>(null);
   const [transTab, setTransTab] = useState<"raw" | "script">("raw");  // 대화기록 / 스크립트
   const [draft, setDraft] = useState("");          // 발화 중 라이브 초안(스트리밍 느낌) → 엔드포인트에서 최종으로 교체
@@ -214,7 +214,9 @@ export default function App() {
   const [scriptParas, setScriptParas] = useState<api.ScriptParagraph[]>([]);
   const [scriptLoading, setScriptLoading] = useState(false);
   // 디스플레이 모드 + 패널 분할 + 인터뷰 번역
-  const [displayMode, setDisplayMode] = usePref<"full" | "assist" | "interview">("ghost.displayMode", "full");
+  const [displayMode, setDisplayMode] = usePref<"full" | "assist">("ghost.displayMode", "full");
+  const [translateOn, setTranslateOn] = usePref("ghost.translateOn", false);   // 실시간 번역 토글(우하단)
+  const [translateMenuOpen, setTranslateMenuOpen] = useState(false);
   const [splitPct, setSplitPct] = usePref<number>("ghost.splitPct", 42);
   const [transLang, setTransLang] = usePref<string>("ghost.transLang", "en");
   const [transLangs, setTransLangs] = useState<api.TransLang[]>([]);
@@ -273,7 +275,7 @@ export default function App() {
   }, [pushFeed, t]);
   useEffect(() => { loadRecentMeetings(); }, [loadRecentMeetings]);
   // 디스플레이 모드 → Electron 창 크기/always-on-top 동기화 + 번역 언어 목록
-  useEffect(() => { (window as { ghost?: { setWindowMode?: (m: string) => void } }).ghost?.setWindowMode?.(displayMode); }, [displayMode]);
+  // (창 자동 리사이즈 제거 — 모드 전환은 레이아웃만 바꾼다. assist 눌렀을 때 창이 작아지던 문제 해결)
   // 번역 언어 목록 — 첫 실행엔 백엔드가 늦게 떠 빈 배열이 올 수 있어, 채워질 때까지 재시도.
   useEffect(() => {
     if (transLangs.length) return;
@@ -306,13 +308,12 @@ export default function App() {
       setStatus(await api.getStatus());
       refreshStreamingStt();
     } catch { /* ignore */ }
-    setModelPickOpen(false);
   }, [refreshStreamingStt]);
   // 인터뷰 모드: 번역 안 된 전사 줄을 하나씩 순차 번역(언어별 캐시).
   // ref 가드로 한 번에 하나만 — 진행 중 번역을 새 줄/상태 변화로 취소하지 않는다(이전 버그: 첫 줄 뒤 멈춤).
   const translatingRef = useRef(false);
   useEffect(() => {
-    if ((displayMode !== "interview" && appMode !== "watch") || translatingRef.current) return;
+    if ((!translateOn && appMode !== "watch") || translatingRef.current) return;
     const pending = transcript.find((ln) => translations[`${transLang}:${ln.id}`] === undefined);
     if (!pending) return;
     translatingRef.current = true;
@@ -325,7 +326,7 @@ export default function App() {
       onDone: () => { setTranslations((m) => ({ ...m, [key]: acc.trim() })); translatingRef.current = false; },
       onError: () => { translatingRef.current = false; },
     });
-  }, [displayMode, appMode, transLang, transcript, translations]);
+  }, [translateOn, appMode, transLang, transcript, translations]);
 
   // 패널 분할 드래그(리사이즈 핸들러)
   const splitRef = useRef<HTMLDivElement | null>(null);
@@ -533,7 +534,7 @@ export default function App() {
     const wake = WAKE_RE.test(text);
     const q = wake ? text.replace(WAKE_RE, "").trim() : text;
     // 인터뷰·워치 모드: 카드가 초점이 아니므로 비-호명 발화는 라우팅(judge) 생략 → codex를 번역에 양보(거의 실시간).
-    if ((displayMode === "interview" || watchOpenRef.current) && !wake) return;
+    if (watchOpenRef.current && !wake) return;   // 워치 모드는 자동 카드 개입 생략(스크립트 집중)
     let r: api.Route;
     try { r = await api.route(wake ? q || text : text, histCtx, mid); } catch { return; }
     if (r.kind === "chat") { showChat(q || text, r.say || ""); if (wake && r.say) speak(r.say); return; }
@@ -554,7 +555,7 @@ export default function App() {
     if (actingRef.current || queueRef.current.length) return;
     liveCardRef.current = Date.now();
     startAction(qq, r.say || "", historyRef.current.join("\n"), false);
-  }, [showChat, startAction, pushHistory, speak, liveSens, displayMode]);
+  }, [showChat, startAction, pushHistory, speak, liveSens]);
 
   // 배치 경로: VAD 엔드포인트 → WAV를 REST 전사 → ingest. (parakeet/로컬/클라우드 배치 공통)
   const onUtterance = useCallback(async (blob: Blob) => {
@@ -815,11 +816,11 @@ export default function App() {
 
   return (
    <LangProvider lang={lang} setLang={changeLang}>
-    {appMode === "home" && <Launcher onSelect={enterMode} isMac={isMacApp} t={t} />}
+    {appMode === "home" && <Launcher onSelect={enterMode} onSettings={() => setAdminOpen(true)} onHelp={() => setHelpOpen(true)} isMac={isMacApp} t={t} />}
     <div className={cn("h-full flex-col bg-background text-foreground", appMode === "home" ? "hidden" : "flex")}>
       {/* 상단 바 */}
       <header className="relative z-10 flex h-12 shrink-0 items-center gap-3 border-b border-hairline px-3" style={{ ...DRAG, paddingLeft: isMacApp ? 80 : undefined }}>
-        <div className="flex items-center gap-2"><GhostLogo variant="icon" size={20} className="rounded-md" /><span className="text-[14px] font-semibold tracking-tight">Ghost</span></div>
+        <button style={NO_DRAG} onClick={goHome} title={t("header.home")} className="flex items-center gap-2 rounded-lg px-1 py-0.5 hover:bg-surface"><GhostLogo variant="icon" size={20} className="rounded-md" /><span className="text-[14px] font-semibold tracking-tight">Ghost</span></button>
         <div style={NO_DRAG} className="relative ml-1">
           <button onClick={() => setBackendMenuOpen((o) => !o)}
             className="inline-flex h-7 items-center gap-1.5 rounded-full border border-hairline bg-surface-soft px-2.5 text-[12px] font-medium text-foreground hover:bg-surface">
@@ -850,7 +851,7 @@ export default function App() {
         <div style={NO_DRAG} className="ml-auto flex items-center gap-1">
           {/* 디스플레이 모드 전환 */}
           <div className="mr-1 flex items-center rounded-full border border-hairline bg-surface-soft p-0.5">
-            {([["full", Columns2, t("mode.full")], ["assist", PanelRight, t("mode.assist")], ["interview", Languages, t("mode.interview")]] as const).map(([m, Icon, label]) => (
+            {([["full", Columns2, t("mode.full")], ["assist", PanelRight, t("mode.assist")]] as const).map(([m, Icon, label]) => (
               <button key={m} onClick={() => setDisplayMode(m)} title={label}
                 className={cn("grid size-7 place-items-center rounded-full transition-colors", displayMode === m ? "bg-ink text-canvas" : "text-steel hover:text-foreground")}>
                 <Icon className="size-3.5" />
@@ -899,17 +900,16 @@ export default function App() {
                   {tab === "raw" ? t("trans.tabRaw") : t("trans.tabScript")}
                 </button>
               ))}
-              {displayMode === "interview" && transTab === "raw" && (
-                <select value={transLang} onChange={(e) => setTransLang(e.target.value)} title={t("trans.translateTo")}
-                  className="ml-1 h-6 rounded-md border border-hairline bg-surface-soft px-1.5 text-[11px] text-steel outline-none focus:border-ink/40">
-                  {(transLangs.length ? transLangs : [{ code: "en", label: "English" } as api.TransLang]).map((l) => <option key={l.code} value={l.code}>↳ {l.label}</option>)}
-                </select>
+              {translateOn && transTab === "raw" && (
+                <span className="ml-1 inline-flex items-center gap-0.5 rounded-md bg-spark/15 px-1.5 py-0.5 text-[10.5px] font-medium text-spark-deep" title={t("trans.translateTo")}>
+                  <Globe className="size-3" /> {(transLangs.find((l) => l.code === transLang)?.label) || transLang}
+                </span>
               )}
             </div>
             <div className="ml-auto flex items-center gap-1">
               {/* 도구 더보기(⋯) — 맥락·검색·복사·내보내기·비우기를 라벨과 함께 한 메뉴로 */}
               <div className="relative">
-                <button onClick={() => setToolsOpen((v) => !v)} title={t("trans.more")} className="grid size-7 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground"><MoreHorizontal className="size-4" /></button>
+                <button onClick={() => setToolsOpen((v) => !v)} title={t("trans.more")} className="inline-flex h-7 items-center gap-1 rounded-lg border border-hairline px-2 text-[11.5px] font-medium text-steel hover:bg-surface hover:text-foreground"><MoreHorizontal className="size-3.5" /> {t("trans.more")}</button>
                 {toolsOpen && (
                   <>
                     <div className="fixed inset-0 z-20" onClick={() => setToolsOpen(false)} />
@@ -972,44 +972,7 @@ export default function App() {
             <Waveform active={active} level={level} bars={20} />
             <span className="ml-auto flex items-center gap-2 text-[11px] text-stone">
               {/* 현재 음성 인식 모델 — 클릭하면 바로 교체(provider+model 함께 설정) */}
-              <span className="relative">
-                {(() => {
-                  const isCloud = status?.stt_provider === "elevenlabs";
-                  const sm = sttModelsList;
-                  const label = isCloud
-                    ? (sm?.cloud.find((x) => x.id === sm.cloud_active)?.label?.split(" · ")[0] || "Scribe")
-                    : (sm?.local.find((x) => x.id === sm.local_active)?.label?.split(" · ")[0] || (sm?.local_active || "").split("/").pop() || "STT");
-                  return (
-                    <button onClick={() => setModelPickOpen((v) => !v)} disabled={active} title={t("trans.pickModel")}
-                      className="flex items-center gap-1 rounded-full border border-hairline bg-surface px-2 py-0.5 font-medium text-steel hover:text-foreground disabled:opacity-60">
-                      <span className={`size-1.5 rounded-full ${engineUsed?.fallback ? "bg-[#e9a23b]" : "bg-spark"}`} />
-                      {label}<ChevronDown className="size-3 opacity-60" />
-                    </button>
-                  );
-                })()}
-                {modelPickOpen && (
-                  <>
-                    <div className="fixed inset-0 z-20" onClick={() => setModelPickOpen(false)} />
-                    <div className="absolute right-0 top-7 z-30 max-h-72 w-64 overflow-y-auto rounded-xl border border-hairline bg-background p-1 shadow-lg">
-                      <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-stone">클라우드</div>
-                      {sttModelsList?.cloud.map((m) => (
-                        <button key={m.id} onClick={() => pickModel("cloud", m.id)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-steel hover:bg-surface-soft">
-                          <span className="truncate">{m.label}</span>
-                          {status?.stt_provider === "elevenlabs" && sttModelsList?.cloud_active === m.id && <Check className="ml-auto size-3.5 shrink-0 text-spark-deep" />}
-                        </button>
-                      ))}
-                      <div className="mt-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-stone">로컬</div>
-                      {sttModelsList?.local.map((m) => (
-                        <button key={m.id} onClick={() => pickModel("local", m.id)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-steel hover:bg-surface-soft">
-                          <span className="truncate">{m.label.split(" · ")[0]}</span>
-                          {m.engine_ready === false && <span className="ml-auto shrink-0 text-[9.5px] text-[#b06a00]">설치필요</span>}
-                          {status?.stt_provider !== "elevenlabs" && sttModelsList?.local_active === m.id && <Check className="ml-auto size-3.5 shrink-0 text-spark-deep" />}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </span>
+              <ModelPicker provider={status?.stt_provider} models={sttModelsList} onPick={pickModel} disabled={active} fallbackColor={!!engineUsed?.fallback} t={t} />
               {active && <span className="font-mono tabular-nums text-steel">{fmtTime(elapsed)}</span>}
               {status && !status.stt_ready ? t("trans.loadingModel") : demoOn ? t("trans.demoPlaying") : active ? (speaking ? t("trans.listening") : t("trans.waiting")) : t("trans.off")}
             </span>
@@ -1049,7 +1012,7 @@ export default function App() {
               return shown.map((ln) => (
                 <div key={ln.id} className="transcript-settle rounded-md px-1">
                   <p className="text-[13px] leading-relaxed text-slate">{ln.text}</p>
-                  {displayMode === "interview" && (
+                  {translateOn && (
                     <p className="mt-0.5 text-[12.5px] leading-relaxed text-spark-deep">
                       {translations[`${transLang}:${ln.id}`] ?? <span className="italic text-stone">…</span>}
                     </p>
@@ -1213,6 +1176,27 @@ export default function App() {
         </div>
       </footer>
 
+      {/* 우하단 실시간 번역 토글 (창모드에서 분리) — 켜면 각 전사 줄 아래 번역 표시 */}
+      <div className="absolute bottom-24 right-5 z-30 flex flex-col items-end gap-2" style={NO_DRAG}>
+        {translateMenuOpen && (
+          <div className="max-h-64 w-44 overflow-y-auto rounded-xl border border-hairline bg-background p-1 shadow-xl">
+            {(transLangs.length ? transLangs : [{ code: "en", name: "English", label: "English" }, { code: "ko", name: "Korean", label: "한국어" }] as api.TransLang[]).map((l) => (
+              <button key={l.code} onClick={() => { setTransLang(l.code); setTranslateOn(true); setTranslateMenuOpen(false); }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-steel hover:bg-surface-soft">
+                {l.label}{transLang === l.code && <Check className="ml-auto size-3.5 text-spark-deep" />}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center overflow-hidden rounded-full border border-hairline bg-canvas shadow-lg">
+          <button onClick={() => setTranslateOn((v) => !v)} title={t("translate.toggle")}
+            className={cn("flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium transition-colors", translateOn ? "bg-spark text-white" : "text-steel hover:text-foreground")}>
+            <Globe className="size-3.5" /> {translateOn ? (transLangs.find((l) => l.code === transLang)?.label || transLang) : t("translate.off")}
+          </button>
+          <button onClick={() => setTranslateMenuOpen((v) => !v)} title={t("trans.translateTo")} className="border-l border-hairline px-1.5 py-2 text-stone hover:text-foreground"><ChevronDown className="size-3.5" /></button>
+        </div>
+      </div>
+
       {ctxOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => setCtxOpen(false)}>
           <div className="w-full max-w-lg rounded-2xl border border-hairline bg-background p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -1258,10 +1242,13 @@ export default function App() {
         onAsk={runManual}
         t={t}
         isMac={isMacApp}
+        provider={status?.stt_provider} models={sttModelsList} onPickModel={pickModel}
+        source={source} setSource={setSource}
       />
 
       {/* 음성 파일 모드 — 업로드 → 타임스탬프 전사 + 재생 + 회의록(구간 재생 주석) */}
-      <AudioView open={appMode === "audio"} onClose={goHome} isMac={isMacApp} t={t} />
+      <AudioView open={appMode === "audio"} onClose={goHome} isMac={isMacApp} t={t}
+        provider={status?.stt_provider} models={sttModelsList} onPickModel={pickModel} transLangs={transLangs} lang={lang} />
 
       <Onboarding
         open={onboard}
