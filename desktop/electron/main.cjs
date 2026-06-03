@@ -49,9 +49,14 @@ function backendEnv() {
   return env;
 }
 
-// 프리즈된 백엔드 실행 파일 경로(패키징 시). 있으면 Python/uv 없이 이걸 직접 띄운다.
-function frozenBackend() {
-  return path.join(process.resourcesPath, "backend", IS_WIN ? "ghost-backend.exe" : "ghost-backend");
+// 동봉된 uv 경로(패키징 시 resources/bin/uv). 없으면 PATH에서 탐색.
+// uv가 Python·의존성·STT 엔진을 필요할 때 자동 다운로드하므로 사용자 PC에 아무 설치도 불필요.
+function uvPath() {
+  if (app.isPackaged) {
+    const p = path.join(process.resourcesPath, "bin", IS_WIN ? "uv.exe" : "uv");
+    if (fs.existsSync(p)) return p;
+  }
+  return firstExisting(["uv"]);
 }
 
 /** /api/health의 version을 반환(고스트 백엔드가 아니거나 응답 없으면 null). */
@@ -166,22 +171,16 @@ async function ensureBackend() {
     await reclaimPort();
   }
   const env = backendEnv();
-  const exe = frozenBackend();
-  if (app.isPackaged && fs.existsSync(exe)) {
-    // 프리즈된 백엔드: 사용자 PC에 Python/uv 불필요. 동봉 실행 파일을 직접 띄운다.
-    backendProc = spawn(exe, [], { cwd: path.dirname(exe), stdio: "inherit", env });
-  } else {
-    // 개발(또는 프리즈 미존재): uv로 소스 구동.
-    const cwd = resolveBackendDir();
-    const uv = firstExisting(["uv"]);
-    backendProc = spawn(
-      uv,
-      ["run", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", String(BACKEND_PORT), "--log-level", "warning"],
-      { cwd, stdio: "inherit", env }
-    );
-  }
+  // 동봉 uv로 소스 백엔드 구동. uv가 첫 실행 시 Python·의존성을 자동 다운로드(무설치).
+  const cwd = resolveBackendDir();
+  const uv = uvPath();
+  backendProc = spawn(
+    uv,
+    ["run", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", String(BACKEND_PORT), "--log-level", "warning"],
+    { cwd, stdio: "inherit", env }
+  );
   backendProc.on("error", (e) => console.error("[backend] spawn failed:", e.message));
-  // 첫 실행은 의존성 준비로 수 분 걸릴 수 있음(dev) → 넉넉히 대기. 프리즈는 보통 수 초.
+  // 첫 실행은 uv의 Python/의존성 다운로드로 1~수 분 걸릴 수 있음 → 넉넉히 대기.
   for (let i = 0; i < 600; i++) {
     if (await backendAlive()) return;
     await new Promise((r) => setTimeout(r, 1000));

@@ -51,7 +51,7 @@ const DICT: Record<string, Record<Lang, string>> = {
   "audio.minutesWorking": { ko: "회의록 정리 중…", en: "Writing minutes…", zh: "整理纪要中…" },
   "audio.minutesFail": { ko: "회의록 생성 실패", en: "Minutes failed", zh: "纪要生成失败" },
   "audio.minutesHint": { ko: "전사가 끝났어요. ‘회의록 생성’을 누르면 타임스탬프와 함께 정리해요.", en: "Transcript ready. Generate minutes with clickable timestamps.", zh: "转写完成。点击生成带时间戳的纪要。" },
-  "audio.noText": { ko: "전사 내용이 없어요. 다른 파일이나 ASR 설정을 확인하세요.", en: "No transcript — check the file or your ASR setup.", zh: "没有转写内容，请检查文件或 ASR 设置。" },
+  "audio.noText": { ko: "전사 결과가 없어요. STT가 준비 안 됐을 수 있어요 — 설정 → 음성 인식에서 ElevenLabs 키를 넣거나 로컬 모델 엔진을 설치(다운로드)하세요.", en: "No transcript — STT may not be set up. In Settings → Speech, add an ElevenLabs key or install (download) a local model engine.", zh: "没有转写结果——STT 可能未配置。请在设置→语音识别中填入 ElevenLabs 密钥或安装本地模型引擎。" },
   "audio.error": { ko: "전사에 실패했어요.", en: "Transcription failed.", zh: "转写失败。" },
   "font.title": { ko: "글꼴", en: "Font", zh: "字体" },
   "font.desc": { ko: "내 컴퓨터에 설치된 글꼴로 앱 글꼴을 바꿉니다.", en: "Use a font installed on your computer for the app.", zh: "使用电脑中已安装的字体。" },
