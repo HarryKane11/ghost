@@ -29,7 +29,7 @@ type Line = { id: string; text: string };
 export function WatchView({
   open, onClose, active, onToggleListen,
   transcript, translations, transLang, setTransLang, transLangs,
-  draft, cards, onAsk, t,
+  draft, cards, onAsk, t, isMac = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -44,7 +44,10 @@ export function WatchView({
   cards: WatchCard[];
   onAsk: (q: string) => void;
   t: (k: string) => string;
+  isMac?: boolean;
 }) {
+  const DRAG = { WebkitAppRegion: "drag" } as any;
+  const NODRAG = { WebkitAppRegion: "no-drag" } as any;
   const [url, setUrl] = useState("");
   const [videoId, setVideoId] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
@@ -62,18 +65,19 @@ export function WatchView({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas">
-      {/* 상단 바: 닫기 · URL · 듣기 토글 */}
-      <div className="flex items-center gap-2 border-b border-hairline px-4 py-2.5">
-        <button onClick={onClose} className="grid size-8 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground"><X className="size-4.5" /></button>
+      {/* 상단 바: 닫기 · URL · 듣기 토글. macOS는 신호등(닫기 버튼)과 안 겹치게 왼쪽 여백 + 드래그 영역. */}
+      <div className="flex items-center gap-2 border-b border-hairline px-4 py-2.5" style={{ ...DRAG, paddingLeft: isMac ? 84 : undefined }}>
+        <button style={NODRAG} onClick={onClose} title={t("admin.back")} className="grid size-8 shrink-0 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground"><X className="size-4.5" /></button>
         <MonitorPlay className="size-4 shrink-0 text-[#ff0033]" />
         <input
+          style={NODRAG}
           value={url} onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") loadUrl(); }}
           placeholder={t("watch.urlPlaceholder")}
           className="h-8 min-w-0 flex-1 rounded-lg border border-hairline bg-surface-soft px-3 text-[12.5px] text-charcoal outline-none placeholder:text-stone focus:border-ink/40"
         />
-        <button onClick={loadUrl} className="h-8 shrink-0 rounded-lg border border-hairline px-3 text-[12px] font-medium text-steel hover:text-foreground">{t("watch.load")}</button>
-        <button onClick={onToggleListen}
+        <button style={NODRAG} onClick={loadUrl} className="h-8 shrink-0 rounded-lg border border-hairline px-3 text-[12px] font-medium text-steel hover:text-foreground">{t("watch.load")}</button>
+        <button style={NODRAG} onClick={onToggleListen}
           className={cn("inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-colors",
             active ? "bg-[#d05757] text-white" : "bg-ink text-canvas")}>
           {active ? <><Square className="size-3.5" /> {t("watch.stop")}</> : <><Ear className="size-3.5" /> {t("watch.listen")}</>}

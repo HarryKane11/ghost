@@ -1162,6 +1162,7 @@ export default function App() {
         cards={feed.filter((x): x is CardItem => x.kind === "card").slice(-4)}
         onAsk={runManual}
         t={t}
+        isMac={isMacApp}
       />
 
       <Onboarding
