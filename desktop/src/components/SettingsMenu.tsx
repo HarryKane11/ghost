@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines, Volume2, ChevronRight, ChevronLeft, Download, Search } from "lucide-react";
+import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines, Volume2, ChevronRight, ChevronLeft, Download, Search, Gauge, Type, Cpu, Sparkles } from "lucide-react";
 import * as api from "@/lib/api";
 import type { Spec } from "@/components/GenUI";
 import { BrandIcon, hasBrand, EntityIcon, hasEntityIcon } from "@/components/BrandIcon";
@@ -17,7 +17,7 @@ const APP_VERSION =
 export function SettingsMenu({
   open, onClose, status, onOpenMeeting, onReplayGuide, onStatus,
   digestMin, setDigestMin, liveSens, setLiveSens, autoResearch, setAutoResearch,
-  variant = "drawer",
+  variant = "drawer", isMac = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -32,10 +32,27 @@ export function SettingsMenu({
   autoResearch: boolean;
   setAutoResearch: (v: boolean) => void;
   variant?: "drawer" | "page";   // drawer=빠른 설정 드롭다운, page=전체화면 관리자 페이지
+  isMac?: boolean;
 }) {
   const page = variant === "page";
   const [mq, setMq] = useState("");   // 회의 아카이브 검색어(page 변형)
+  const [nav, setNav] = useState("usage");   // 관리자 좌측 사이드바 선택 그룹
   const { t, lang, setLang } = useT();
+  // 좌측 사이드바 네비게이션 그룹(page 변형 전용)
+  const NAV: { id: string; label: string; icon: React.ReactNode }[] = [
+    { id: "usage", label: t("admin.navUsage"), icon: <Gauge className="size-4" /> },
+    { id: "appearance", label: t("admin.navAppearance"), icon: <Type className="size-4" /> },
+    { id: "agent", label: t("admin.navAgent"), icon: <Cpu className="size-4" /> },
+    { id: "stt", label: t("admin.navStt"), icon: <AudioLines className="size-4" /> },
+    { id: "tts", label: t("admin.navTts"), icon: <Volume2 className="size-4" /> },
+    { id: "connectors", label: t("admin.navConnectors"), icon: <Link2 className="size-4" /> },
+    { id: "proactive", label: t("admin.navProactive"), icon: <Sparkles className="size-4" /> },
+    { id: "storage", label: t("admin.navStorage"), icon: <KeyRound className="size-4" /> },
+    { id: "meetings", label: t("admin.navMeetings"), icon: <History className="size-4" /> },
+  ];
+  // 그룹 래퍼: 드로어(전체 스크롤)는 항상 표시, 페이지(사이드바)는 선택 그룹만.
+  const Grp = ({ id, children }: { id: string; children: React.ReactNode }) =>
+    (!page || nav === id) ? <>{children}</> : null;
   const [connectors, setConnectors] = useState<{ name: string; status: string }[]>([]);
   const [tools, setTools] = useState<{ name: string; desc: string; on: boolean }[]>([]);
   const [meetings, setMeetings] = useState<api.MeetingMeta[]>([]);
@@ -184,13 +201,36 @@ export function SettingsMenu({
         : "fixed inset-0 z-50 flex items-start justify-center bg-ink/20 backdrop-blur-sm"}
       onClick={page ? undefined : onClose}
     >
+      {/* 관리자: 좌측 고정 사이드바 네비게이션 */}
+      {page && (
+        <aside className="fixed inset-y-0 left-0 z-[51] flex w-[224px] flex-col border-r border-hairline bg-surface-soft/50">
+          <div className="flex items-center gap-2 px-4 py-3.5 text-[13px] font-semibold tracking-tight text-foreground" style={{ paddingLeft: isMac ? 84 : undefined }}>
+            <button onClick={onClose} className="grid size-7 shrink-0 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground" title={t("admin.back")}><ChevronLeft className="size-4" /></button>
+            {t("admin.title")}
+          </div>
+          <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
+            {NAV.map((n) => (
+              <button key={n.id} onClick={() => setNav(n.id)}
+                className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium transition-colors",
+                  nav === n.id ? "bg-ink text-canvas" : "text-steel hover:bg-surface hover:text-foreground")}>
+                {n.icon}{n.label}
+              </button>
+            ))}
+          </nav>
+          {onReplayGuide && (
+            <button onClick={onReplayGuide} className="m-2 inline-flex items-center justify-center gap-1.5 rounded-lg border border-hairline px-2.5 py-2 text-[12px] text-steel hover:bg-surface hover:text-foreground">
+              <Compass className="size-3.5" /> {t("settings.replayGuide")}
+            </button>
+          )}
+        </aside>
+      )}
       <div
         className={page
-          ? "mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-6 py-5"
+          ? "w-full flex-1 overflow-y-auto py-5 pl-[248px] pr-7"
           : "mt-16 max-h-[80vh] w-[560px] overflow-y-auto rounded-2xl border border-hairline bg-canvas p-5 shadow-2xl"}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className={cn("mb-4 flex items-center justify-between", page && "sticky top-0 z-10 -mx-6 -mt-5 border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur")}>
+        <div className={cn("mb-4 flex items-center justify-between", page && "hidden")}>
           <div className="flex items-center gap-2">
             {page && (
               <button onClick={onClose} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground">
@@ -209,6 +249,7 @@ export function SettingsMenu({
           </div>
         </div>
 
+        <Grp id="usage">
         {/* 파이프라인 플로우 — STT → Agent → TTS(선택) */}
         {(() => {
           const isCloud = status?.stt_provider === "elevenlabs";
@@ -244,8 +285,10 @@ export function SettingsMenu({
           );
         })()}
 
-        {/* 관리자 전용: 사용량·비용 대시보드 + 글꼴 설정 */}
+        {/* 관리자 전용: 사용량·비용 대시보드 */}
         {page && <UsageDashboard t={t} />}
+        </Grp>
+        <Grp id="appearance">
         {page && <FontSettings t={t} />}
 
         {/* 언어 */}
@@ -260,6 +303,8 @@ export function SettingsMenu({
           </div>
         </Section>
 
+        </Grp>
+        <Grp id="agent">
         {/* Codex auth */}
         <Section icon={<BrandIcon name="codex" size={16} />} title={t("settings.codexTitle")}>
           <div className="mb-2 flex items-center gap-2">
@@ -315,6 +360,8 @@ export function SettingsMenu({
           {keySaved && <div className="mt-1.5 flex items-center gap-1 text-[12px] text-spark-deep"><Check className="size-3.5" /> {t("settings.saved")}</div>}
         </Section>
 
+        </Grp>
+        <Grp id="stt">
         {/* STT (음성 인식) */}
         <Section icon={<AudioLines className="size-4 text-steel" />} title={t("settings.sttTitle")}>
           <div className="flex items-center gap-1.5">
@@ -424,6 +471,8 @@ export function SettingsMenu({
           )}
         </Section>
 
+        </Grp>
+        <Grp id="tts">
         {/* TTS (음성 응답) — 설치형, 목록만 제공 */}
         <Section icon={<Volume2 className="size-4 text-steel" />} title={t("settings.ttsTitle")}>
           <div className="flex items-center gap-2 text-[12.5px]">
@@ -441,6 +490,8 @@ export function SettingsMenu({
           <p className="mt-1.5 text-[11px] leading-relaxed text-stone">{t("settings.ttsDesc")}</p>
         </Section>
 
+        </Grp>
+        <Grp id="connectors">
         {/* MCP connectors */}
         <Section icon={<BrandIcon name="codex" size={16} />} title={`${t("settings.connectorsTitle")} (${connectors.length})`}>
           {connectors.length === 0 ? (
@@ -497,6 +548,8 @@ export function SettingsMenu({
           <p className="mt-1.5 text-[11px] text-stone">{t("settings.connectHint")}</p>
         </Section>
 
+        </Grp>
+        <Grp id="agent">
         {/* Codex tools */}
         <Section icon={<BrandIcon name="codex" size={16} />} title={t("settings.toolsTitle")}>
           <div className="space-y-2">
@@ -515,6 +568,8 @@ export function SettingsMenu({
           </div>
         </Section>
 
+        </Grp>
+        <Grp id="proactive">
         {/* 능동성 — 다이제스트 주기 · 실시간 개입 민감도 · 자동 조사 */}
         <Section icon={<AudioLines className="size-4 text-steel" />} title={t("settings.proactiveTitle")}>
           <div className="mb-1 text-[11px] text-stone">{t("settings.digestEvery")}</div>
@@ -538,6 +593,8 @@ export function SettingsMenu({
           <p className="mt-1.5 text-[11px] leading-relaxed text-stone">{t("settings.autoResearchDesc")}</p>
         </Section>
 
+        </Grp>
+        <Grp id="storage">
         {/* 저장 위치 + 로컬 모델 */}
         <Section icon={<History className="size-4 text-steel" />} title={t("settings.storageTitle")}>
           <div className="mb-1 text-[11px] text-stone">{t("settings.storagePath")}</div>
@@ -604,6 +661,8 @@ export function SettingsMenu({
           </div>
         </Section>
 
+        </Grp>
+        <Grp id="meetings">
         {/* Meeting history */}
         <Section icon={<History className="size-4 text-steel" />} title={`${t("settings.meetingsTitle")} (${meetings.length})`}>
           {meetings.length === 0 ? (
@@ -647,6 +706,7 @@ export function SettingsMenu({
           )}
         </Section>
 
+        </Grp>
         {/* 정보 */}
         <div className="flex items-center justify-between px-1 pt-1 text-[11.5px] text-stone">
           <span>Ghost v{APP_VERSION} · {t("settings.oss")}</span>

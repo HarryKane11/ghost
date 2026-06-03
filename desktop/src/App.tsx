@@ -3,7 +3,7 @@ import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, SlidersHorizontal, AudioLines, Square,
   HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Copy,
-  Languages, Columns2, PanelRight, LayoutDashboard, Home,
+  Languages, Columns2, PanelRight, LayoutDashboard, Home, History,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -209,6 +209,7 @@ export default function App() {
   const [ctxOpen, setCtxOpen] = useState(false);
   const [ctxText, setCtxText] = useState("");
   const [recentMeetings, setRecentMeetings] = useState<api.MeetingMeta[]>([]);
+  const [histOpen, setHistOpen] = usePref("ghost.histSidebar", true);   // 좌측 회의 내역 사이드바
   const [atOpen, setAtOpen] = useState(false);  // @ 과거 회의 참조 드롭다운
   const [onboard, setOnboard] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -226,6 +227,7 @@ export default function App() {
   const streamingSttRef = useRef(false);
   const nativeStreamRef = useRef(false);   // parakeet ws 네이티브 토큰-스트리밍 가능
   const interimBusyRef = useRef(false);
+  const draftSeqRef = useRef(0);   // 발화 세대 — 종료(다듬기) 후 늦게 오는 초안 무시용
   const [scriptParas, setScriptParas] = useState<api.ScriptParagraph[]>([]);
   const [scriptLoading, setScriptLoading] = useState(false);
   // 디스플레이 모드 + 패널 분할 + 인터뷰 번역
@@ -260,7 +262,7 @@ export default function App() {
   const digestBusyRef = useRef(false);  // 다이제스트 진행 중 → 중복 생성 방지(pile-up)
   const inputRef = useRef<HTMLInputElement | null>(null);
   const demoTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const { start, stop, level, speaking } = useListening();
+  const { start, stop, release, level, speaking } = useListening();
 
   const g = (typeof window !== "undefined" ? (window as any).ghost : null) || {};
   const isMacApp = !!g.isElectron && g.platform === "darwin";
@@ -279,6 +281,13 @@ export default function App() {
   useEffect(() => { refreshStatus(); }, [refreshStatus]);
   // @ 참조용 최근 회의 목록 (메뉴 열 때·회의 종료 시 갱신)
   const loadRecentMeetings = useCallback(() => { api.getMeetings().then(setRecentMeetings).catch(() => {}); }, []);
+  // 회의 내역에서 한 건 열기 → 회의록(또는 요약)을 카드로 띄움.
+  const openMeetingCard = useCallback(async (m: api.MeetingMeta) => {
+    const full = await api.getMeeting(m.id);
+    const spec = full?.minutes || { title: m.title, spoken: "", intent: "note",
+      blocks: [{ type: "text", text: full?.summary || t("hist.noMinutes") }] };
+    pushFeed({ kind: "card", id: newId(), query: m.title, status: "done", progress: [], spec, pinned: true });
+  }, [pushFeed, t]);
   useEffect(() => { loadRecentMeetings(); }, [loadRecentMeetings]);
   // 디스플레이 모드 → Electron 창 크기/always-on-top 동기화 + 번역 언어 목록
   useEffect(() => { (window as { ghost?: { setWindowMode?: (m: string) => void } }).ghost?.setWindowMode?.(displayMode); }, [displayMode]);
@@ -506,7 +515,12 @@ export default function App() {
   const onInterim = useCallback(async (blob: Blob) => {
     if (interimBusyRef.current) return;          // 직전 초안 처리 중이면 건너뜀
     interimBusyRef.current = true;
-    try { const r = await api.transcribe(blob); if (r.text) setDraft(r.text); }
+    const seq = draftSeqRef.current;             // 이 초안이 속한 발화 세대
+    try {
+      const r = await api.transcribe(blob);
+      // 발화가 그새 종료(다듬기)됐으면(세대 변경) 늦게 온 초안으로 덮어쓰지 않는다.
+      if (r.text && seq === draftSeqRef.current) setDraft(r.text);
+    }
     catch { /* ignore */ }
     finally { interimBusyRef.current = false; }
   }, []);
@@ -549,6 +563,7 @@ export default function App() {
   // 배치 경로: VAD 엔드포인트 → WAV를 REST 전사 → ingest. (parakeet/로컬/클라우드 배치 공통)
   const onUtterance = useCallback(async (blob: Blob) => {
     const mid = meetingIdRef.current;
+    draftSeqRef.current += 1;   // 새 세대 → 진행 중이던 초안(회색) 무효화
     setDraft("");   // 엔드포인트 도달 → 초안 지우고 최종(정제) 라인으로 교체
     let text = "";
     try {
@@ -617,12 +632,13 @@ export default function App() {
     if (m === "watch") setSource("system");
     setAppMode(m);
   }, [setSource]);
-  // 어느 모드에서든 런처(home)로 복귀. 듣는 중이면 멈추고 마이크로 원복.
+  // 어느 모드에서든 런처(home)로 복귀. 듣는 중이면 멈추고, 캐시된 시스템 스트림까지 완전 해제.
   const goHome = useCallback(() => {
-    if (active) { setActive(false); stop(); setDraft(""); const mid = meetingIdRef.current; if (mid) api.endMeeting(mid); }
+    if (active) { setActive(false); setDraft(""); const mid = meetingIdRef.current; if (mid) api.endMeeting(mid); }
+    release();   // stop() + 시스템 오디오 스트림 종료(다음 진입 때 권한은 OS 기억대로)
     setSource("mic");
     setAppMode("home");
-  }, [active, stop, setSource]);
+  }, [active, release, setSource]);
 
   // @[제목] 참조를 풀어 해당 지난 회의 요약을 쿼리에 덧붙인다.
   const resolveRefs = useCallback(async (q: string): Promise<string> => {
@@ -856,6 +872,26 @@ export default function App() {
 
       {/* 본문 — 모드별 레이아웃 (full/interview: 전사+우측, assist: 카드만) */}
       <div ref={splitRef} className="flex min-h-0 flex-1">
+        {/* 좌측 회의 내역 사이드바 (접기 가능) */}
+        <aside className={cn("flex shrink-0 flex-col border-r border-hairline bg-surface-soft/30 transition-[width]", histOpen ? "w-56" : "w-11")}>
+          <div className="flex items-center gap-1.5 px-2 py-2.5">
+            <button onClick={() => setHistOpen((v) => !v)} title={t("hist.title")} className="grid size-7 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground"><History className="size-4" /></button>
+            {histOpen && <span className="text-[12px] font-semibold text-foreground">{t("hist.title")}</span>}
+          </div>
+          {histOpen && (
+            <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
+              {recentMeetings.length === 0 ? (
+                <p className="px-2 py-6 text-center text-[11.5px] leading-relaxed text-stone">{t("hist.empty")}</p>
+              ) : recentMeetings.map((m) => (
+                <button key={m.id} onClick={() => openMeetingCard(m)}
+                  className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface">
+                  <span className="truncate text-[12.5px] text-charcoal">{m.title}</span>
+                  <span className="text-[10.5px] text-stone">{m.duration_sec ? `${Math.max(1, Math.round(m.duration_sec / 60))}분` : `${m.utterance_count ?? 0}발화`}{m.has_minutes ? " · 회의록" : ""}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </aside>
         {/* 좌: 실시간 전사 (assist 모드에선 숨김) */}
         <section className={cn("flex min-h-0 flex-col border-r border-hairline", displayMode === "assist" && "hidden")}
           style={displayMode === "assist" ? undefined : { width: `${splitPct}%` }}>
@@ -1163,7 +1199,7 @@ export default function App() {
         onOpenMeeting={(title, spec) => pushFeed({ kind: "card", id: newId(), query: title, status: "done", progress: [], spec, pinned: true })} />
 
       {/* 전체화면 관리자 페이지 — 회의 아카이브 + 모델·커넥터·용어집·저장 설정 (메인은 캡처에 집중) */}
-      <SettingsMenu variant="page" open={adminOpen} onClose={() => setAdminOpen(false)} status={status}
+      <SettingsMenu variant="page" open={adminOpen} isMac={isMacApp} onClose={() => setAdminOpen(false)} status={status}
         onStatus={setStatus}
         onReplayGuide={() => { setAdminOpen(false); setOnboard(true); }}
         digestMin={digestMin} setDigestMin={setDigestMin}

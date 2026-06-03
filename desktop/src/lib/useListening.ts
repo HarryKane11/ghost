@@ -2,11 +2,12 @@ import { useCallback, useRef, useState } from "react";
 
 export type Source = "mic" | "system";
 
-const SILENCE_MS = 950;     // 발화 후 침묵 950ms → 종료 (문장 중간 숨에서 안 끊기게 상향)
-const INTERIM_MS = 1700;    // 발화 중 이 주기로 '초안' 전사(스트리밍 느낌). 엔드포인트에서 최종 정제로 교체.
+const SILENCE_MS = 1500;    // 발화 후 침묵 1.5s → 문장 끝으로 보고 종료(=다듬기 트리거). 여유있게 잡아
+                            // 문장 중간 숨(보통 <1s)에 안 끊기고, 진짜 마침에서만 정식 문장으로 정제.
+const INTERIM_MS = 2000;    // 발화 중 이 주기로 '초안' 전사(회색). 주기를 늘려 최종 정제와의 깜빡임 줄임.
 const START_MS = 120;       // 이만큼 연속 음성이면 발화 시작으로 확정
 const PREROLL_MS = 320;     // 시작 검출 전 이만큼을 앞에 붙여 앞 잘림 방지
-const TAIL_MS = 250;        // 종료 후 이만큼 더 포함해 뒤 잘림 방지
+const TAIL_MS = 350;        // 종료 후 이만큼 더 포함해 뒤 잘림 방지(문장 끝 여유)
 const MIN_SPEECH_MS = 280;  // 너무 짧은 잡음 무시
 const MAX_UTTER_MS = 20000; // 최대 발화 길이
 const RING_SEC = 26;        // 링버퍼 길이
@@ -44,6 +45,8 @@ function encodeWav(samples: Float32Array, sampleRate: number): Blob {
  */
 export function useListening() {
   const streamRef = useRef<MediaStream | null>(null);
+  const sysStreamRef = useRef<MediaStream | null>(null);   // 캐시된 시스템 오디오 스트림(권한 재요청 방지)
+  const curSourceRef = useRef<Source>("mic");
   const ctxRef = useRef<AudioContext | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
   const srcNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -168,10 +171,18 @@ export function useListening() {
   const acquire = useCallback(async (source: Source, deviceId?: string) => {
     let stream: MediaStream;
     if (source === "system") {
-      const d = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-      d.getVideoTracks().forEach((t) => t.stop());
-      if (!d.getAudioTracks().length) throw new DOMException("시스템 오디오를 가져오지 못했습니다", "NotFoundError");
-      stream = new MediaStream(d.getAudioTracks());
+      // 시스템 오디오 스트림은 세션 내 캐시·재사용 → getDisplayMedia(=화면녹화 권한 프롬프트)가
+      // 청취를 다시 켤 때마다 뜨지 않게 한다. (release()에서만 완전 해제)
+      const cached = sysStreamRef.current;
+      if (cached && cached.getAudioTracks().some((t) => t.readyState === "live")) {
+        stream = cached;
+      } else {
+        const d = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        d.getVideoTracks().forEach((t) => t.stop());
+        if (!d.getAudioTracks().length) throw new DOMException("시스템 오디오를 가져오지 못했습니다", "NotFoundError");
+        stream = new MediaStream(d.getAudioTracks());
+        sysStreamRef.current = stream;
+      }
     } else {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -180,6 +191,7 @@ export function useListening() {
         },
       });
     }
+    curSourceRef.current = source;
     streamRef.current = stream;
     const ctx = new AudioContext();
     ctxRef.current = ctx;
@@ -247,7 +259,10 @@ export function useListening() {
     try { procRef.current?.disconnect(); } catch {}
     try { srcNodeRef.current?.disconnect(); } catch {}
     try { ctxRef.current?.close(); } catch {}
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    // 마이크는 즉시 해제(프라이버시 표시 끔). 시스템 스트림은 캐시 유지 → 재청취 시 권한 재요청 X.
+    if (curSourceRef.current !== "system") {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    }
     procRef.current = null;
     srcNodeRef.current = null;
     ctxRef.current = null;
@@ -257,5 +272,12 @@ export function useListening() {
     setLevel(0);
   }, []);
 
-  return { start, stop, level, speaking };
+  // 완전 해제 — 캐시된 시스템 스트림까지 종료(모드 나갈 때/홈 복귀 시).
+  const release = useCallback(() => {
+    stop();
+    sysStreamRef.current?.getTracks().forEach((t) => t.stop());
+    sysStreamRef.current = null;
+  }, [stop]);
+
+  return { start, stop, release, level, speaking };
 }
