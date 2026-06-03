@@ -1,1 +1,1 @@
-설득할 수 없어 누나들은.
+We also go deep into their approach on quality control for the end report the agent writes and their eval system to ensure accuracy. Basically we have this sub agent which is this reviewer agent that just knows what a good report looks like. So that's what we run it using the asynchronous runner. And then in the live runner, we use it as an evaluation system. Listen has figured out how to run agents at

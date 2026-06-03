@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from "react";
 export type Source = "mic" | "system";
 
 const SILENCE_MS = 950;     // 발화 후 침묵 950ms → 종료 (문장 중간 숨에서 안 끊기게 상향)
+const INTERIM_MS = 1700;    // 발화 중 이 주기로 '초안' 전사(스트리밍 느낌). 엔드포인트에서 최종 정제로 교체.
 const START_MS = 120;       // 이만큼 연속 음성이면 발화 시작으로 확정
 const PREROLL_MS = 320;     // 시작 검출 전 이만큼을 앞에 붙여 앞 잘림 방지
 const TAIL_MS = 250;        // 종료 후 이만큼 더 포함해 뒤 잘림 방지
@@ -37,6 +38,8 @@ export function useListening() {
   const procRef = useRef<ScriptProcessorNode | null>(null);
   const srcNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const onUttRef = useRef<((b: Blob) => void) | null>(null);
+  const onInterimRef = useRef<((b: Blob) => void) | null>(null);
+  const interimMsRef = useRef(0);
 
   // 링버퍼
   const ringRef = useRef<Float32Array | null>(null);
@@ -107,6 +110,7 @@ export function useListening() {
           setSpeaking(true);
           speechMsRef.current = START_MS;
           silenceMsRef.current = 0;
+          interimMsRef.current = 0;
         }
       } else {
         startFramesRef.current = 0;
@@ -115,9 +119,21 @@ export function useListening() {
       speechMsRef.current += frameMs;
       if (rms < endThresh) silenceMsRef.current += frameMs;
       else silenceMsRef.current = 0;
+      // 발화 중 주기적 '초안' 전사 — 스트리밍 느낌(엔드포인트에서 최종으로 교체).
+      if (onInterimRef.current) {
+        interimMsRef.current += frameMs;
+        if (interimMsRef.current >= INTERIM_MS) {
+          interimMsRef.current = 0;
+          const rate = rateRef.current;
+          const fromAbs = candStartRef.current - Math.floor((PREROLL_MS / 1000) * rate);
+          const samples = extract(fromAbs, writtenRef.current);
+          if (samples.length > rate * 0.3) onInterimRef.current(encodeWav(samples, rate));
+        }
+      }
       if (silenceMsRef.current >= SILENCE_MS || speechMsRef.current >= MAX_UTTER_MS) {
         inSpeechRef.current = false;
         startFramesRef.current = 0;
+        interimMsRef.current = 0;
         setSpeaking(false);
         finalize();
       }
@@ -160,11 +176,13 @@ export function useListening() {
   }, [onAudio]);
 
   const start = useCallback(
-    async (onUtterance: (b: Blob) => void, source: Source = "mic", deviceId?: string) => {
+    async (onUtterance: (b: Blob) => void, onInterim: ((b: Blob) => void) | null, source: Source = "mic", deviceId?: string) => {
       onUttRef.current = onUtterance;
+      onInterimRef.current = onInterim;   // null이면 초안(interim) 비활성
       inSpeechRef.current = false;
       startFramesRef.current = 0;
       silenceMsRef.current = 0;
+      interimMsRef.current = 0;
       noiseRef.current = 0.012;
       await acquire(source, deviceId); // 권한/지원 에러는 throw → 호출부 처리
     },

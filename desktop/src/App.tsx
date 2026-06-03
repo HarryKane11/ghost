@@ -204,6 +204,10 @@ export default function App() {
   const [tq, setTq] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [transTab, setTransTab] = useState<"raw" | "script">("raw");  // 대화기록 / 스크립트
+  const [draft, setDraft] = useState("");          // 발화 중 라이브 초안(스트리밍 느낌) → 엔드포인트에서 최종으로 교체
+  const [streamingStt, setStreamingStt] = useState(false);  // 활성 STT가 스트리밍 지원(로컬)
+  const streamingSttRef = useRef(false);
+  const interimBusyRef = useRef(false);
   const [scriptParas, setScriptParas] = useState<api.ScriptParagraph[]>([]);
   const [scriptLoading, setScriptLoading] = useState(false);
   // 디스플레이 모드 + 패널 분할 + 인터뷰 번역
@@ -261,6 +265,13 @@ export default function App() {
   // 디스플레이 모드 → Electron 창 크기/always-on-top 동기화 + 번역 언어 목록
   useEffect(() => { (window as { ghost?: { setWindowMode?: (m: string) => void } }).ghost?.setWindowMode?.(displayMode); }, [displayMode]);
   useEffect(() => { api.getTranslateLangs().then(setTransLangs); }, []);
+  // 활성 STT 모델이 스트리밍 지원인지 판단(로컬 + streaming caps) → interim 초안 on/off
+  const refreshStreamingStt = useCallback(async () => {
+    const m = await api.getSttModels();
+    const on = status?.stt_provider !== "elevenlabs" && !!m?.local.find((x) => x.id === m.local_active)?.streaming;
+    setStreamingStt(on); streamingSttRef.current = on;
+  }, [status?.stt_provider]);
+  useEffect(() => { refreshStreamingStt(); }, [refreshStreamingStt, menuOpen]);
   // 인터뷰 모드: 번역 안 된 전사 줄을 하나씩 순차 번역(언어별 캐시).
   // ref 가드로 한 번에 하나만 — 진행 중 번역을 새 줄/상태 변화로 취소하지 않는다(이전 버그: 첫 줄 뒤 멈춤).
   const translatingRef = useRef(false);
@@ -454,9 +465,19 @@ export default function App() {
     return () => clearInterval(id);
   }, [active, demoOn, digestMin, runDigest]);
 
+  // 발화 중 라이브 초안(스트리밍 느낌) — 빠른 배치 전사로 미리보기. 저장/라우팅 안 함.
+  const onInterim = useCallback(async (blob: Blob) => {
+    if (interimBusyRef.current) return;          // 직전 초안 처리 중이면 건너뜀
+    interimBusyRef.current = true;
+    try { const t = await api.transcribe(blob); if (t) setDraft(t); }
+    catch { /* ignore */ }
+    finally { interimBusyRef.current = false; }
+  }, []);
+
   const onUtterance = useCallback(async (blob: Blob) => {
     let text = "";
     const mid = meetingIdRef.current;
+    setDraft("");   // 엔드포인트 도달 → 초안 지우고 최종(정제) 라인으로 교체
     try { text = await api.transcribe(blob, mid, source); }
     catch {
       // 전사 실패를 조용히 삼키면 "마이크는 켜졌는데 아무 반응 없음"으로 보인다.
@@ -500,7 +521,7 @@ export default function App() {
 
   const toggleActive = useCallback(async () => {
     if (active) {
-      setActive(false); stop();
+      setActive(false); stop(); setDraft("");
       const mid = meetingIdRef.current;
       if (mid) api.endMeeting(mid);   // 종료 표시(폴더는 유지)
       return;
@@ -513,10 +534,11 @@ export default function App() {
       liveCardRef.current = 0; digestTextRef.current = ""; digestBusyRef.current = false;
       try { const m = await api.startMeeting(); meetingIdRef.current = m.id; setMeetingTitle(m.title); setMeetingFolder(m.folder || ""); }
       catch { meetingIdRef.current = ""; }
-      setActive(true); await start(onUtterance, source, source === "mic" ? micId || undefined : undefined);
+      setActive(true);
+      await start(onUtterance, streamingSttRef.current ? onInterim : null, source, source === "mic" ? micId || undefined : undefined);
     }
     catch (e) { setActive(false); flash(t(captureErrKey(e))); }
-  }, [active, start, stop, onUtterance, source, micId, t]);
+  }, [active, start, stop, onUtterance, onInterim, source, micId, t]);
 
   // @[제목] 참조를 풀어 해당 지난 회의 요약을 쿼리에 덧붙인다.
   const resolveRefs = useCallback(async (q: string): Promise<string> => {
@@ -867,6 +889,10 @@ export default function App() {
                 </div>
               ));
             })()}
+            {/* 라이브 초안(스트리밍 모델) — 말하는 동안 흐릿하게 떴다가 엔드포인트에서 최종으로 교체 */}
+            {draft && active && !tq.trim() && (
+              <p className="text-[13px] italic leading-relaxed text-stone">{draft}<span className="text-spark-deep">…</span></p>
+            )}
             {/* 듣는 중: 곧 들어올 문장 구조를 블럭으로 보여주고 유령이 지나가며 출렁 */}
             {active && !tq.trim() && !demoOn && (
               <GhostBlocks dur={2.6} size={15} count={18} className="mt-1" />
