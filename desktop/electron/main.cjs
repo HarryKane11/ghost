@@ -11,15 +11,25 @@ let backendProc = null;
 let win = null;
 let tray = null;
 
+const IS_WIN = process.platform === "win32";
 const HOME = os.homedir();
-const BIN_DIRS = ["/opt/homebrew/bin", path.join(HOME, ".local/bin"), "/usr/local/bin", "/usr/bin"];
+// GUI 앱은 셸 PATH를 상속하지 않으므로 uv/ffmpeg/codex 탐색용 디렉터리를 OS별로 보강.
+const BIN_DIRS = IS_WIN
+  ? [
+      path.join(HOME, ".local", "bin"),
+      path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WinGet", "Links"),
+      path.join(process.env.LOCALAPPDATA || "", "Programs", "uv"),
+      path.join(process.env.APPDATA || "", "Python", "Scripts"),
+    ].filter(Boolean)
+  : ["/opt/homebrew/bin", path.join(HOME, ".local/bin"), "/usr/local/bin", "/usr/bin"];
 
 function firstExisting(names, dirs = BIN_DIRS) {
-  for (const d of dirs) for (const n of names) {
+  const cands = IS_WIN ? names.flatMap((n) => [`${n}.exe`, `${n}.cmd`, n]) : names;
+  for (const d of dirs) for (const n of cands) {
     const p = path.join(d, n);
     if (fs.existsSync(p)) return p;
   }
-  return names[0];
+  return IS_WIN ? `${names[0]}.exe` : names[0];   // PATH에서 .exe 해석되도록
 }
 
 // 이 빌드가 기대하는 백엔드 버전 마커. 앱이 띄운 백엔드만 이 값을 health에 보고한다.
@@ -30,7 +40,7 @@ function expectedBuild() {
 function backendEnv() {
   const env = { ...process.env };
   // GUI 앱은 셸 PATH를 상속하지 않으므로 보강 (uv·ollama·codex·ffmpeg 탐색)
-  env.PATH = [...BIN_DIRS, env.PATH || ""].join(":");
+  env.PATH = [...BIN_DIRS, env.PATH || ""].join(path.delimiter);
   env.GHOST_BUILD = expectedBuild();   // /api/health가 echo → '내 백엔드' 식별
   return env;
 }
@@ -63,11 +73,13 @@ function backendAlive() {
   });
 }
 
-/** 8765를 점유한 '옛/외부' 고스트 백엔드를 회수(종료). macOS: lsof로 PID 찾아 kill. best-effort. */
+/** 포트를 점유한 '옛/외부' 고스트 백엔드를 회수(종료). best-effort. */
 function reclaimPort() {
   return new Promise((resolve) => {
     try {
-      const r = spawn("/bin/sh", ["-c", `lsof -ti tcp:${BACKEND_PORT} | xargs kill 2>/dev/null; sleep 1`], { stdio: "ignore" });
+      const r = IS_WIN
+        ? spawn("cmd", ["/c", `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${BACKEND_PORT} ^| findstr LISTENING') do taskkill /F /PID %a`], { stdio: "ignore", windowsHide: true })
+        : spawn("/bin/sh", ["-c", `lsof -ti tcp:${BACKEND_PORT} | xargs kill 2>/dev/null; sleep 1`], { stdio: "ignore" });
       r.on("close", () => resolve());
       r.on("error", () => resolve());
     } catch { resolve(); }
@@ -167,7 +179,8 @@ async function createWindow() {
     minWidth: 880,
     minHeight: 560,
     backgroundColor: "#ffffff",
-    titleBarStyle: "hiddenInset",
+    // macOS만 신호등 인셋(hiddenInset). Windows/Linux는 기본 프레임(네이티브 최소/최대/닫기).
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
