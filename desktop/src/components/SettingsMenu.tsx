@@ -276,6 +276,10 @@ export function SettingsMenu({
             {status?.stt_provider === "elevenlabs" ? t("settings.sttCloudDesc") : t("settings.sttLocalDesc")}
           </p>
 
+          {/* 모델 목록 로드 실패(백엔드 미연결/구버전) → 빈 화면 대신 안내 */}
+          {status?.stt_provider !== "elevenlabs" && !sttModels && (
+            <p className="mt-2.5 text-[11.5px] text-[#b06a00]">{t("settings.sttModelsFail")}</p>
+          )}
           {/* 로컬 모델 선택 (영어권 포함 여러 HF 모델 + 커스텀) */}
           {status?.stt_provider !== "elevenlabs" && sttModels && (
             <div className="mt-2.5">

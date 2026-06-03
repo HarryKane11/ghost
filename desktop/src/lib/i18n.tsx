@@ -188,6 +188,7 @@ const DICT: Record<string, Record<Lang, string>> = {
   "settings.sttLocalDesc": { ko: "온디바이스 · 무료 · 오프라인. 정확도는 보통.", en: "On-device · free · offline. Moderate accuracy.", zh: "本地 · 免费 · 离线。准确度中等。" },
   "settings.sttCloudDesc": { ko: "ElevenLabs Scribe v2 · 고정확도(한국어 지원) · 유료(~$0.39/시간). 키 필요.", en: "ElevenLabs Scribe v2 · high accuracy (Korean) · paid (~$0.39/hr). Key required.", zh: "ElevenLabs Scribe v2 · 高准确度（支持韩语）· 付费（~$0.39/小时）。需密钥。" },
   "settings.sttModel": { ko: "모델", en: "Model", zh: "模型" },
+  "settings.sttModelsFail": { ko: "모델 목록을 불러오지 못했어요 — 백엔드 연결/버전을 확인하세요(헤더에 ‘백엔드 끊김’이면 백엔드 재시작).", en: "Couldn't load the model list — check the backend connection/version (restart it if the header shows 'Backend down').", zh: "无法加载模型列表——请检查后端连接/版本。" },
   "settings.sttCustom": { ko: "직접 입력 (HF repo)…", en: "Custom (HF repo)…", zh: "自定义 (HF repo)…" },
   "settings.sttUseCustom": { ko: "적용", en: "Use", zh: "应用" },
   "settings.sttModelDesc": { ko: "한국어·다국어는 Qwen3-ASR, 영어 위주면 Parakeet/Whisper가 빠르고 정확해요. faster-whisper·WhisperX(화자분리)·Granite도 의존성을 깔면 쓸 수 있어요. (선택 후 첫 사용 시 다운로드)", en: "Qwen3-ASR for Korean/multilingual; Parakeet/Whisper are fast for English. faster-whisper, WhisperX (diarization), and Granite work once you install their deps. (Downloads on first use)", zh: "韩语/多语用 Qwen3-ASR；英语用 Parakeet/Whisper。安装依赖后可用 faster-whisper、WhisperX(说话人分离)、Granite。（首次使用时下载）" },
