@@ -279,7 +279,15 @@ export default function App() {
   useEffect(() => { loadRecentMeetings(); }, [loadRecentMeetings]);
   // 디스플레이 모드 → Electron 창 크기/always-on-top 동기화 + 번역 언어 목록
   useEffect(() => { (window as { ghost?: { setWindowMode?: (m: string) => void } }).ghost?.setWindowMode?.(displayMode); }, [displayMode]);
-  useEffect(() => { api.getTranslateLangs().then(setTransLangs); }, []);
+  // 번역 언어 목록 — 첫 실행엔 백엔드가 늦게 떠 빈 배열이 올 수 있어, 채워질 때까지 재시도.
+  useEffect(() => {
+    if (transLangs.length) return;
+    let cancelled = false;
+    const tryFetch = () => api.getTranslateLangs().then((l) => { if (!cancelled && l.length) setTransLangs(l); }).catch(() => {});
+    tryFetch();
+    const id = setInterval(() => { if (transLangs.length) { clearInterval(id); } else { tryFetch(); } }, 3000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [transLangs.length]);
   // 라이브 초안(실시간 느낌)을 어떤 경로로 줄지 판단.
   //  · native(parakeet ws): 진짜 토큰-스트리밍
   //  · 그 외 모든 모델/제공자: 2-pass interim 초안(주기적 빠른 전사)으로 실시간처럼.

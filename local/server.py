@@ -46,6 +46,25 @@ def _load_dotenv() -> None:
         pass
 
 
+def _persist_env(key: str, value: str) -> None:
+    """키를 server.py 옆 .env에 영속 저장(앱 재시작 후에도 유지). 기존 키는 갱신, 나머지는 보존."""
+    import pathlib
+    p = pathlib.Path(__file__).resolve().parent / ".env"
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
+        out, found = [], False
+        for line in lines:
+            if line.strip() and not line.strip().startswith("#") and line.split("=", 1)[0].strip() == key:
+                out.append(f"{key}={value}"); found = True
+            else:
+                out.append(line)
+        if not found:
+            out.append(f"{key}={value}")
+        p.write_text("\n".join(out) + "\n", encoding="utf-8")
+    except Exception:  # noqa: BLE001 — 영속 실패해도 런타임 환경변수는 이미 설정됨
+        pass
+
+
 _load_dotenv()
 
 app = FastAPI(title="Ghost Local Backend")
@@ -192,6 +211,7 @@ def set_eleven_key(req: ElevenKeyReq) -> dict:
     k = (req.key or "").strip()
     if k:
         os.environ["ELEVENLABS_API_KEY"] = k
+        _persist_env("ELEVENLABS_API_KEY", k)   # 재시작 후에도 유지
     return {"ok": bool(k), "set": bool(stt_cloud.elevenlabs_key())}
 
 
@@ -423,6 +443,7 @@ def set_apikey(req: ApiKeyReq) -> dict:
     k = (req.key or "").strip()
     if k:
         os.environ["OPENAI_API_KEY"] = k
+        _persist_env("OPENAI_API_KEY", k)   # 재시작 후에도 유지
     return {"ok": bool(k), "set": bool(os.environ.get("OPENAI_API_KEY"))}
 
 

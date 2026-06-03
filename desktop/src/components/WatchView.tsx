@@ -22,6 +22,18 @@ function parseVideoId(input: string): string {
 
 type Line = { id: string; text: string };
 
+// 백엔드 langs fetch가 늦거나 실패해도 셀렉트가 비지 않도록 내장 폴백(백엔드 목록과 동일).
+const FALLBACK_LANGS: TransLang[] = [
+  { code: "en", name: "English", label: "English" },
+  { code: "ko", name: "Korean", label: "한국어" },
+  { code: "zh", name: "Simplified Chinese", label: "中文" },
+  { code: "ja", name: "Japanese", label: "日本語" },
+  { code: "es", name: "Spanish", label: "Español" },
+  { code: "fr", name: "French", label: "Français" },
+  { code: "de", name: "German", label: "Deutsch" },
+  { code: "vi", name: "Vietnamese", label: "Tiếng Việt" },
+];
+
 /**
  * YouTube 워치 모드 — 임베드 영상 + 우측 실시간 스크립트·번역 + 우하단 플로팅 고스트 챗.
  * 스크립트는 '시스템 오디오'를 STT로 받아 만든다(영상 소리를 공유해야 함). 번역은 기존 파이프라인 재사용.
@@ -50,6 +62,7 @@ export function WatchView({
   const NODRAG = { WebkitAppRegion: "no-drag" } as any;
   const [url, setUrl] = useState("");
   const [videoId, setVideoId] = useState("");
+  const langs = transLangs.length ? transLangs : FALLBACK_LANGS;
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
 
@@ -84,15 +97,14 @@ export function WatchView({
         </button>
       </div>
 
-      {/* 본문: 위 영상 · 아래 스크립트+번역 */}
+      {/* 본문: 위 영상(상단 영역 꽉 채움) · 아래 스크립트+번역 */}
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 items-center justify-center bg-[#0c0d10] p-4">
+        <div className="relative min-h-0 flex-1 bg-black">
           {embedSrc ? (
-            <div className="aspect-video max-h-full w-auto max-w-4xl overflow-hidden rounded-xl border border-hairline" style={{ aspectRatio: "16 / 9" }}>
-              <iframe src={embedSrc} title="YouTube" className="size-full" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
-            </div>
+            <iframe src={embedSrc} title="YouTube" className="absolute inset-0 size-full border-0"
+              allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen />
           ) : (
-            <div className="flex flex-col items-center gap-3 text-center text-stone">
+            <div className="flex size-full flex-col items-center justify-center gap-3 text-center text-stone">
               <MonitorPlay className="size-10 text-white/20" />
               <p className="text-[13px] text-white/50">{t("watch.empty")}</p>
             </div>
@@ -111,7 +123,7 @@ export function WatchView({
               <Languages className="size-3.5 text-stone" />
               <select value={transLang} onChange={(e) => setTransLang(e.target.value)}
                 className="h-7 rounded-lg border border-hairline bg-surface-soft px-1.5 text-[11.5px] text-charcoal outline-none focus:border-ink/40">
-                {transLangs.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+                {langs.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
               </select>
             </div>
           </div>
