@@ -157,6 +157,16 @@ function createWindow() {
     { useSystemPicker: false }
   );
 
+  // YouTube 임베드(워치 모드): 패키징 앱은 file:// origin이라 IFrame 플레이어가 거부한다(오류 150/153).
+  // youtube 계열 요청에 유효한 Referer를 주입해 재생되게 한다.
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ["*://*.youtube.com/*", "*://*.youtube-nocookie.com/*", "*://*.ytimg.com/*", "*://*.googlevideo.com/*"] },
+    (details, cb) => {
+      details.requestHeaders["Referer"] = "https://www.youtube.com/";
+      cb({ requestHeaders: details.requestHeaders });
+    }
+  );
+
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http")) shell.openExternal(url);
     return { action: "deny" };
