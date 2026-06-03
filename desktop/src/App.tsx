@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
-  Mic, MonitorSpeaker, Loader2, Check, SlidersHorizontal, AudioLines, Square,
+  Mic, MonitorSpeaker, Loader2, Check, Settings, AudioLines, Square,
   HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Copy,
-  Languages, Columns2, PanelRight, LayoutDashboard, Home, History,
+  Languages, Columns2, PanelRight, Home, History, MoreHorizontal,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -119,18 +119,6 @@ function CommandStep({ item, active }: { item: api.ProgressItem; active: boolean
   );
 }
 
-/** 곧 들어올 문장 구조를 사각형(블럭)들이 좌→우 웨이브로 출렁이며 알려준다(유령 없음). */
-function GhostBlocks({ dur = 2.8, count = 16, className }: { dur?: number; count?: number; size?: number; className?: string }) {
-  return (
-    <div className={cn("ghost-blocks pointer-events-none relative flex items-center gap-1.5 py-2", className)} aria-hidden>
-      {Array.from({ length: count }).map((_, i) => (
-        <span key={i} className="block-bump h-2.5 w-2.5 shrink-0 rounded-[3px]"
-          style={{ ["--dur" as any]: `${dur}s`, ["--bd" as any]: `${(i / count) * dur}s` }} />
-      ))}
-    </div>
-  );
-}
-
 const GHOST_KEYS = ["ghost.l0", "ghost.l1", "ghost.l2", "ghost.l3", "ghost.l4", "ghost.l5", "ghost.l6"];
 
 /** 유령다운 로딩 문장 롤링. */
@@ -169,13 +157,6 @@ function usePref<T>(key: string, initial: T): [T, (value: T | ((prev: T) => T)) 
 
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-/** 전사 배지용 짧은 모델 라벨. provider=elevenlabs면 Scribe, 로컬은 repo 끝 토막을 다듬는다. */
-function engineLabel(u: { model: string; engine: string; provider: string }): string {
-  if (u.provider === "elevenlabs") return u.model.replace(/_/g, " ").replace(/\bv(\d)/, "v$1");
-  const tail = (u.model.split("/").pop() || u.model);
-  return tail.replace(/-(bf16|fp16|int8|mlx|v\d+)$/i, "").replace(/-/g, " ");
-}
-
 let idc = 0;
 const newId = () => `i${++idc}`;
 const isMinutesReq = (q: string) => /회의록|회의\s*정리|회의\s*요약|회의\s*내용/.test(q);
@@ -199,8 +180,7 @@ export default function App() {
   const t = useMemo(() => makeT(lang), [lang]);
   const changeLang = useCallback((l: Lang) => { setLangPref(l); api.setLang(l); }, [setLangPref]);
   const [thinking, setThinking] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);   // 전체화면 관리자 페이지
+  const [adminOpen, setAdminOpen] = useState(false);   // 전체화면 관리자 페이지(톱니바퀴)
   // 진입 런처 + 모드 라우터. 매 실행 'home'(런처)에서 시작.
   const [appMode, setAppMode] = useState<"home" | "live" | "watch" | "audio">("home");
   const watchOpenRef = useRef(false);
@@ -219,6 +199,9 @@ export default function App() {
   const [micId, setMicId] = usePref<string>("ghost.micId", "");
   const [tq, setTq] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);   // 전사 도구 더보기(⋯) 메뉴
+  const [modelPickOpen, setModelPickOpen] = useState(false);   // 파형 옆 모델 선택
+  const [sttModelsList, setSttModelsList] = useState<api.SttModels | null>(null);
   const [transTab, setTransTab] = useState<"raw" | "script">("raw");  // 대화기록 / 스크립트
   const [draft, setDraft] = useState("");          // 발화 중 라이브 초안(스트리밍 느낌) → 엔드포인트에서 최종으로 교체
   const [streamingStt, setStreamingStt] = useState(false);  // 활성 STT가 스트리밍 지원(로컬)
@@ -311,7 +294,20 @@ export default function App() {
     const interim = !native;   // 네이티브가 아니면 2-pass 초안을 모든 모델에서 켠다
     setStreamingStt(interim); streamingSttRef.current = interim;
   }, []);
-  useEffect(() => { refreshStreamingStt(); }, [refreshStreamingStt, menuOpen]);
+  useEffect(() => { refreshStreamingStt(); }, [refreshStreamingStt, adminOpen]);
+  // STT 모델 목록(파형 옆 빠른 선택용). 관리자 닫힘/시작 시 갱신.
+  useEffect(() => { api.getSttModels().then(setSttModelsList).catch(() => {}); }, [adminOpen]);
+  // 파형 옆에서 모델을 바로 바꾼다 — provider+model을 함께 설정해 '반영 안 됨' 문제 해결.
+  const pickModel = useCallback(async (kind: "local" | "cloud", id: string) => {
+    try {
+      await api.setSttProvider(kind === "cloud" ? "elevenlabs" : "local");
+      await api.selectSttModel(kind, id);
+      setSttModelsList(await api.getSttModels());
+      setStatus(await api.getStatus());
+      refreshStreamingStt();
+    } catch { /* ignore */ }
+    setModelPickOpen(false);
+  }, [refreshStreamingStt]);
   // 인터뷰 모드: 번역 안 된 전사 줄을 하나씩 순차 번역(언어별 캐시).
   // ref 가드로 한 번에 하나만 — 진행 중 번역을 새 줄/상태 변화로 취소하지 않는다(이전 버그: 첫 줄 뒤 멈춤).
   const translatingRef = useRef(false);
@@ -798,7 +794,7 @@ export default function App() {
       if (mod && e.key.toLowerCase() === "l") { e.preventDefault(); toggleActive(); }
       else if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); inputRef.current?.focus(); }
       else if (mod && e.key === "/") { e.preventDefault(); setHelpOpen((v) => !v); }
-      else if (e.key === "Escape") { setHelpOpen(false); setMenuOpen(false); setAdminOpen(false); }
+      else if (e.key === "Escape") { setHelpOpen(false); setAdminOpen(false); }
       else if (!typing && e.key === " ") { e.preventDefault(); toggleActive(); }
     };
     window.addEventListener("keydown", onKey);
@@ -862,8 +858,7 @@ export default function App() {
             ))}
           </div>
           <button onClick={() => setHelpOpen(true)} title={t("header.help")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><HelpCircle className="size-4" /></button>
-          <button onClick={() => setMenuOpen(true)} title="설정·관리" className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><SlidersHorizontal className="size-3.5" /> {t("header.menu")}</button>
-          <button onClick={() => setAdminOpen(true)} title={t("header.admin")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><LayoutDashboard className="size-3.5" /> {t("header.admin")}</button>
+          <button onClick={() => setAdminOpen(true)} title={t("header.settings")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><Settings className="size-4" /></button>
           <button onClick={goHome} title={t("header.home")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><Home className="size-3.5" /> {t("header.home")}</button>
           <button onClick={() => setVoiceOn((v) => !v)} title={voiceOn ? t("header.voiceOff") : t("header.voiceOn")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground">{voiceOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}</button>
           <button onClick={() => setDark((d) => !d)} title={t("header.theme")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground">{dark ? <Moon className="size-4" /> : <Sun className="size-4" />}</button>
@@ -912,11 +907,22 @@ export default function App() {
               )}
             </div>
             <div className="ml-auto flex items-center gap-1">
-              <button onClick={openContext} title={t("trans.context")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><FileText className="size-3.5" /></button>
-              <button onClick={() => { setSearchOpen((v) => !v); if (searchOpen) setTq(""); }} title={t("trans.search")} className={cn("grid size-6 place-items-center rounded-md hover:bg-surface hover:text-foreground", searchOpen ? "text-foreground" : "text-stone")}><Search className="size-3.5" /></button>
-              <button onClick={copyTranscript} title={t("trans.copy")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><Copy className="size-3.5" /></button>
-              <button onClick={exportMd} title={t("trans.export")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground"><Download className="size-3.5" /></button>
-              <button onClick={clearSession} disabled={active} title={t("trans.clear")} className="grid size-6 place-items-center rounded-md text-stone hover:bg-surface hover:text-foreground disabled:opacity-40"><Trash2 className="size-3.5" /></button>
+              {/* 도구 더보기(⋯) — 맥락·검색·복사·내보내기·비우기를 라벨과 함께 한 메뉴로 */}
+              <div className="relative">
+                <button onClick={() => setToolsOpen((v) => !v)} title={t("trans.more")} className="grid size-7 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground"><MoreHorizontal className="size-4" /></button>
+                {toolsOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setToolsOpen(false)} />
+                    <div className="absolute right-0 top-9 z-30 w-52 rounded-xl border border-hairline bg-background p-1 shadow-lg">
+                      <button onClick={() => { openContext(); setToolsOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft"><FileText className="size-4 shrink-0 text-stone" /> {t("trans.context")}</button>
+                      <button onClick={() => { setSearchOpen((v) => !v); if (searchOpen) setTq(""); setToolsOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft"><Search className="size-4 shrink-0 text-stone" /> {t("trans.search")}</button>
+                      <button onClick={() => { copyTranscript(); setToolsOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft"><Copy className="size-4 shrink-0 text-stone" /> {t("trans.copy")}</button>
+                      <button onClick={() => { exportMd(); setToolsOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft"><Download className="size-4 shrink-0 text-stone" /> {t("trans.export")}</button>
+                      <button onClick={() => { clearSession(); setToolsOpen(false); }} disabled={active} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft disabled:opacity-40"><Trash2 className="size-4 shrink-0 text-stone" /> {t("trans.clear")}</button>
+                    </div>
+                  </>
+                )}
+              </div>
               <div className="ml-1 flex items-center rounded-full border border-hairline bg-surface-soft p-0.5">
                 {([["mic", t("trans.mic")], ["system", t("trans.system")]] as const).map(([s, label]) => (
                   <button key={s} disabled={active} onClick={() => setSource(s)} className={cn("inline-flex h-5.5 items-center gap-1 rounded-full px-2 text-[11px] font-medium transition-colors disabled:opacity-50", source === s ? "bg-ink text-canvas" : "text-steel hover:text-foreground")}>
@@ -965,15 +971,45 @@ export default function App() {
           <div className="flex items-center gap-2 border-y border-hairline/60 bg-surface-soft/50 px-4 py-2">
             <Waveform active={active} level={level} bars={20} />
             <span className="ml-auto flex items-center gap-2 text-[11px] text-stone">
-              {engineUsed && (
-                <span
-                  title={`전사 엔진: ${engineUsed.model}${engineUsed.fallback ? " (클라우드 실패 → 로컬 폴백)" : ""}`}
-                  className="flex items-center gap-1 rounded-full border border-hairline bg-surface px-2 py-0.5 font-medium text-steel"
-                >
-                  <span className={`size-1.5 rounded-full ${engineUsed.fallback ? "bg-[#e9a23b]" : "bg-spark"}`} />
-                  {engineLabel(engineUsed)}
-                </span>
-              )}
+              {/* 현재 음성 인식 모델 — 클릭하면 바로 교체(provider+model 함께 설정) */}
+              <span className="relative">
+                {(() => {
+                  const isCloud = status?.stt_provider === "elevenlabs";
+                  const sm = sttModelsList;
+                  const label = isCloud
+                    ? (sm?.cloud.find((x) => x.id === sm.cloud_active)?.label?.split(" · ")[0] || "Scribe")
+                    : (sm?.local.find((x) => x.id === sm.local_active)?.label?.split(" · ")[0] || (sm?.local_active || "").split("/").pop() || "STT");
+                  return (
+                    <button onClick={() => setModelPickOpen((v) => !v)} disabled={active} title={t("trans.pickModel")}
+                      className="flex items-center gap-1 rounded-full border border-hairline bg-surface px-2 py-0.5 font-medium text-steel hover:text-foreground disabled:opacity-60">
+                      <span className={`size-1.5 rounded-full ${engineUsed?.fallback ? "bg-[#e9a23b]" : "bg-spark"}`} />
+                      {label}<ChevronDown className="size-3 opacity-60" />
+                    </button>
+                  );
+                })()}
+                {modelPickOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setModelPickOpen(false)} />
+                    <div className="absolute right-0 top-7 z-30 max-h-72 w-64 overflow-y-auto rounded-xl border border-hairline bg-background p-1 shadow-lg">
+                      <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-stone">클라우드</div>
+                      {sttModelsList?.cloud.map((m) => (
+                        <button key={m.id} onClick={() => pickModel("cloud", m.id)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-steel hover:bg-surface-soft">
+                          <span className="truncate">{m.label}</span>
+                          {status?.stt_provider === "elevenlabs" && sttModelsList?.cloud_active === m.id && <Check className="ml-auto size-3.5 shrink-0 text-spark-deep" />}
+                        </button>
+                      ))}
+                      <div className="mt-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-stone">로컬</div>
+                      {sttModelsList?.local.map((m) => (
+                        <button key={m.id} onClick={() => pickModel("local", m.id)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-steel hover:bg-surface-soft">
+                          <span className="truncate">{m.label.split(" · ")[0]}</span>
+                          {m.engine_ready === false && <span className="ml-auto shrink-0 text-[9.5px] text-[#b06a00]">설치필요</span>}
+                          {status?.stt_provider !== "elevenlabs" && sttModelsList?.local_active === m.id && <Check className="ml-auto size-3.5 shrink-0 text-spark-deep" />}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </span>
               {active && <span className="font-mono tabular-nums text-steel">{fmtTime(elapsed)}</span>}
               {status && !status.stt_ready ? t("trans.loadingModel") : demoOn ? t("trans.demoPlaying") : active ? (speaking ? t("trans.listening") : t("trans.waiting")) : t("trans.off")}
             </span>
@@ -1011,7 +1047,7 @@ export default function App() {
               // 새 줄은 유령 커서가 좌→우로 쓸고 지나간 듯(ghost-line) 드러난다.
               // 인터뷰 모드면 각 줄 아래 번역을 함께 보여준다(이중 언어).
               return shown.map((ln) => (
-                <div key={ln.id} className="ghost-line">
+                <div key={ln.id} className="transcript-settle rounded-md px-1">
                   <p className="text-[13px] leading-relaxed text-slate">{ln.text}</p>
                   {displayMode === "interview" && (
                     <p className="mt-0.5 text-[12.5px] leading-relaxed text-spark-deep">
@@ -1021,13 +1057,22 @@ export default function App() {
                 </div>
               ));
             })()}
-            {/* 라이브 초안(스트리밍 모델) — 말하는 동안 흐릿하게 떴다가 엔드포인트에서 최종으로 교체 */}
+            {/* 라이브 초안 — 인식되는 단어마다 초록 칩으로 강조(실시간성). 확정되면 위 라인으로 settle. */}
             {draft && active && !tq.trim() && (
-              <p className="text-[13px] italic leading-relaxed text-stone">{draft}<span className="text-spark-deep">…</span></p>
+              <p className="flex flex-wrap items-center gap-1 px-1 text-[13px] leading-relaxed">
+                {draft.split(/\s+/).filter(Boolean).map((w, i, arr) => (
+                  <span key={i} className={cn("rounded px-1 py-px transition-colors duration-200",
+                    i === arr.length - 1 ? "bg-spark/25 text-spark-deep" : "bg-spark/10 text-charcoal")}>{w}</span>
+                ))}
+                <span className="draft-cursor font-medium text-spark-deep">▍</span>
+              </p>
             )}
-            {/* 듣는 중: 곧 들어올 문장 구조를 블럭으로 보여주고 유령이 지나가며 출렁 */}
-            {active && !tq.trim() && !demoOn && (
-              <GhostBlocks dur={2.6} size={15} count={18} className="mt-1" />
+            {/* 듣는 중(초안 전): shimmer 구조만 (통통 튀는 블록 제거) */}
+            {active && !tq.trim() && !demoOn && !draft && (
+              <div className="mt-1 space-y-2 px-1">
+                <div className="mist h-3 w-3/4 rounded-full" />
+                <div className="mist h-3 w-1/2 rounded-full" />
+              </div>
             )}
             </>)}
             <div ref={transEndRef} />
@@ -1087,8 +1132,6 @@ export default function App() {
                   </div>
                   {it.status === "working" ? (
                     <div className="relative space-y-3 py-1">
-                      {/* 마리오 블럭: 구조를 보여주는 사각형들 위로 유령이 지나가며 출렁 */}
-                      <GhostBlocks dur={3} size={18} />
                       {it.ack && <p className="wisp text-[13px] italic leading-relaxed text-steel">{it.ack}</p>}
                       <GhostLoader />
                       <div className="space-y-1.5">
@@ -1190,15 +1233,7 @@ export default function App() {
         </div>
       )}
 
-      <SettingsMenu open={menuOpen} onClose={() => setMenuOpen(false)} status={status}
-        onStatus={setStatus}
-        onReplayGuide={() => { setMenuOpen(false); setOnboard(true); }}
-        digestMin={digestMin} setDigestMin={setDigestMin}
-        liveSens={liveSens} setLiveSens={setLiveSens}
-        autoResearch={autoResearch} setAutoResearch={setAutoResearch}
-        onOpenMeeting={(title, spec) => pushFeed({ kind: "card", id: newId(), query: title, status: "done", progress: [], spec, pinned: true })} />
-
-      {/* 전체화면 관리자 페이지 — 회의 아카이브 + 모델·커넥터·용어집·저장 설정 (메인은 캡처에 집중) */}
+      {/* 전체화면 관리자 페이지(톱니바퀴) — 회의 아카이브 + 모델·커넥터·용어집·저장 설정 */}
       <SettingsMenu variant="page" open={adminOpen} isMac={isMacApp} onClose={() => setAdminOpen(false)} status={status}
         onStatus={setStatus}
         onReplayGuide={() => { setAdminOpen(false); setOnboard(true); }}

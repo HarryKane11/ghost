@@ -292,5 +292,16 @@ body {
   line-height: 1.9em;
 }
 .dark .paper { background-color: #15151a; }
+/* 확정 라인: 초안(회색/초록)에서 정식 문장으로 부드럽게 안착(초록 하이라이트가 사라지며) */
+@keyframes transcript-settle {
+  from { opacity: 0.35; transform: translateY(3px); background: color-mix(in srgb, var(--spark) 18%, transparent); }
+  to   { opacity: 1; transform: translateY(0); background: transparent; }
+}
+.transcript-settle { animation: transcript-settle 0.5s ease-out; }
+
+/* 초안 커서 깜빡임 */
+@keyframes draft-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+.draft-cursor { animation: draft-cursor 1s steps(2, start) infinite; }
+
 .hand-ko { font-family: "Nanum Pen Script", cursive; }
 .hand-en { font-family: "Caveat", cursive; }
