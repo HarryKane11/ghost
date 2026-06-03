@@ -72,7 +72,8 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
+  /* --app-font: 사용자가 관리자에서 고른 로컬 폰트(없으면 기본 스택). */
+  font-family: var(--app-font, var(--font-sans));
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }

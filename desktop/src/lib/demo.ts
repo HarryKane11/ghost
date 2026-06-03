@@ -22,7 +22,16 @@ export const DEMO_CARDS: { afterLine: number; query: string; ack: string; spec: 
         { type: "stat", label: "전년 대비 성장률", value: "+18.5%" },
         { type: "stat", label: "시장 규모(추정)", value: "₩2.4조" },
         { type: "text", text: "클라우드 전환과 AI 도입이 성장을 견인. 중견기업 도입률이 특히 빠르게 상승." },
+        { type: "accordion", label: "세부 동인", items: [
+          "클라우드 전환 | 온프레미스 → SaaS 이전이 가속. 특히 협업·CRM 분야에서 두드러짐.",
+          "AI 도입 | 생성형 AI 기능 탑재 제품의 ARPU가 비탑재 대비 약 1.6배.",
+        ] },
         { type: "list", items: ["출처: 소프트웨어정책연구소 (2일 전)", "출처: 한국SaaS협회 2025 리포트"] },
+        { type: "actions", items: [
+          "경쟁사 점유율 비교",
+          "성장 동인 자세히 | 국내 SaaS 시장 성장 동인을 자세히 분석해줘",
+          "3년 전망 | 국내 SaaS 시장 향후 3년 성장 전망",
+        ] },
       ],
     },
   },
@@ -37,7 +46,9 @@ export const DEMO_CARDS: { afterLine: number; query: string; ack: string; spec: 
       blocks: [
         { type: "heading", text: "4월 22일 제품 회의 결정사항" },
         { type: "table", items: ["티어 | 가격 | 대상", "Team | ₩29,000/석·월 | 소규모 팀", "Pro | ₩39,000/석·월 | 일반 기업", "Enterprise | 별도 견적 | 온프레미스·보안"] },
+        { type: "checklist", items: ["Pro 티어 가격 페이지 반영", "영업팀에 신규 단가 공유", "온프레미스 견적 템플릿 업데이트"] },
         { type: "list", items: ["출처: Notion · 제품 회의록 (4/22)"] },
+        { type: "actions", items: ["후속 메일 초안 | 가격 정책 확정 내용으로 영업팀 공유 메일 초안 써줘"] },
       ],
     },
   },

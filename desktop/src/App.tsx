@@ -3,13 +3,15 @@ import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, SlidersHorizontal, AudioLines, Square,
   HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Copy,
-  Languages, Columns2, PanelRight,
+  Languages, Columns2, PanelRight, LayoutDashboard, MonitorPlay,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
 import { Waveform } from "@/components/Waveform";
 import { GenUI, type Spec } from "@/components/GenUI";
 import { SettingsMenu } from "@/components/SettingsMenu";
+import { WatchView } from "@/components/WatchView";
+import { loadAppFont } from "@/components/FontSettings";
 import { Onboarding } from "@/components/Onboarding";
 import { Help } from "@/components/Help";
 import { PhantomGhost, PhantomField } from "@/components/Phantom";
@@ -37,6 +39,9 @@ const BACKEND_LABELS: Record<string, string> = { codex: "Codex", openai: "OpenAI
 const ONBOARDED_KEY = "ghost.onboarded.v1";
 // wakeword — 이 말로 부르면 음성으로 답한다.
 const WAKE_RE = /^\s*(재키|자비스|고스트|ghost|hey ghost)[,!\s]*/i;
+// 순수 인사/잡담(작업 요청이 아님) — 수동 입력에서 judge(네트워크) 없이 즉답 chat으로 처리.
+// 입력 '전체'가 인사일 때만 매치(보수적). 그 외엔 전부 act(카드)로 직행.
+const CHAT_RE = /^\s*(안녕[하세요가]*|반가워?요?|고마워요?|고맙[습다]+니?다?|감사[합니다해요]*|잘\s*자|좋은\s*(아침|밤)|들[려리]+[니요]*\??|거기\s*있[어니]\??|hi|hello|hey|thanks|thank\s*you|good\s*(morning|night))[\s!?.~]*$/i;
 // 실시간 개입 confidence 문턱 (민감도별). off=차단, conservative=인색, eager=느슨.
 const LIVE_THRESH: Record<string, number> = { off: 2, conservative: 0.8, eager: 0.5 };
 const LIVE_COOLDOWN_MS = 90_000;  // 실시간 카드 최대 1개 / 90초
@@ -162,6 +167,13 @@ function usePref<T>(key: string, initial: T): [T, (value: T | ((prev: T) => T)) 
 
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
+/** 전사 배지용 짧은 모델 라벨. provider=elevenlabs면 Scribe, 로컬은 repo 끝 토막을 다듬는다. */
+function engineLabel(u: { model: string; engine: string; provider: string }): string {
+  if (u.provider === "elevenlabs") return u.model.replace(/_/g, " ").replace(/\bv(\d)/, "v$1");
+  const tail = (u.model.split("/").pop() || u.model);
+  return tail.replace(/-(bf16|fp16|int8|mlx|v\d+)$/i, "").replace(/-/g, " ");
+}
+
 let idc = 0;
 const newId = () => `i${++idc}`;
 const isMinutesReq = (q: string) => /회의록|회의\s*정리|회의\s*요약|회의\s*내용/.test(q);
@@ -186,6 +198,10 @@ export default function App() {
   const changeLang = useCallback((l: Lang) => { setLangPref(l); api.setLang(l); }, [setLangPref]);
   const [thinking, setThinking] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);   // 전체화면 관리자 페이지
+  const [watchOpen, setWatchOpen] = useState(false);   // YouTube 워치 모드(시스템 오디오 STT + 스크립트·번역)
+  const watchOpenRef = useRef(false);
+  useEffect(() => { watchOpenRef.current = watchOpen; }, [watchOpen]);
   const [backendMenuOpen, setBackendMenuOpen] = useState(false);
   const [ctxOpen, setCtxOpen] = useState(false);
   const [ctxText, setCtxText] = useState("");
@@ -202,6 +218,8 @@ export default function App() {
   const [transTab, setTransTab] = useState<"raw" | "script">("raw");  // 대화기록 / 스크립트
   const [draft, setDraft] = useState("");          // 발화 중 라이브 초안(스트리밍 느낌) → 엔드포인트에서 최종으로 교체
   const [streamingStt, setStreamingStt] = useState(false);  // 활성 STT가 스트리밍 지원(로컬)
+  // 마지막 전사에서 '실제로' 쓰인 엔진/모델(모델 전환이 백엔드에 반영됐는지 확인용 배지).
+  const [engineUsed, setEngineUsed] = useState<{ model: string; engine: string; provider: string; fallback: boolean } | null>(null);
   const streamingSttRef = useRef(false);
   const nativeStreamRef = useRef(false);   // parakeet ws 네이티브 토큰-스트리밍 가능
   const interimBusyRef = useRef(false);
@@ -262,27 +280,36 @@ export default function App() {
   // 디스플레이 모드 → Electron 창 크기/always-on-top 동기화 + 번역 언어 목록
   useEffect(() => { (window as { ghost?: { setWindowMode?: (m: string) => void } }).ghost?.setWindowMode?.(displayMode); }, [displayMode]);
   useEffect(() => { api.getTranslateLangs().then(setTransLangs); }, []);
-  // 활성 STT 모델이 스트리밍 지원인지 판단(로컬 + streaming caps) → interim 초안 on/off
+  // 라이브 초안(실시간 느낌)을 어떤 경로로 줄지 판단.
+  //  · native(parakeet ws): 진짜 토큰-스트리밍
+  //  · 그 외 모든 모델/제공자: 2-pass interim 초안(주기적 빠른 전사)으로 실시간처럼.
+  // 이전엔 interim을 `streaming` 플래그(parakeet 전용)에 묶어, 클라우드·Qwen3·Whisper에선
+  // 발화 끝까지 아무것도 안 보였다 → 이제 네이티브가 아니면 전부 interim으로 초안을 띄운다.
   const refreshStreamingStt = useCallback(async () => {
-    const m = await api.getSttModels();
-    const on = status?.stt_provider !== "elevenlabs" && !!m?.local.find((x) => x.id === m.local_active)?.streaming;
-    setStreamingStt(on); streamingSttRef.current = on;
-    nativeStreamRef.current = on && (await api.getSttStreaming()).available;  // parakeet ws 가능 여부
-  }, [status?.stt_provider]);
+    const native = !!(await api.getSttStreaming()).available;  // parakeet ws 가능 여부
+    nativeStreamRef.current = native;
+    const interim = !native;   // 네이티브가 아니면 2-pass 초안을 모든 모델에서 켠다
+    setStreamingStt(interim); streamingSttRef.current = interim;
+  }, []);
   useEffect(() => { refreshStreamingStt(); }, [refreshStreamingStt, menuOpen]);
   // 인터뷰 모드: 번역 안 된 전사 줄을 하나씩 순차 번역(언어별 캐시).
   // ref 가드로 한 번에 하나만 — 진행 중 번역을 새 줄/상태 변화로 취소하지 않는다(이전 버그: 첫 줄 뒤 멈춤).
   const translatingRef = useRef(false);
   useEffect(() => {
-    if (displayMode !== "interview" || translatingRef.current) return;
+    if ((displayMode !== "interview" && !watchOpen) || translatingRef.current) return;
     const pending = transcript.find((ln) => translations[`${transLang}:${ln.id}`] === undefined);
     if (!pending) return;
     translatingRef.current = true;
     const key = `${transLang}:${pending.id}`;
-    api.translateText(pending.text, transLang)
-      .then((tr) => setTranslations((m) => ({ ...m, [key]: tr || "" })))
-      .finally(() => { translatingRef.current = false; });
-  }, [displayMode, transLang, transcript, translations]);
+    // 토큰 스트리밍: 델타를 누적해 한 줄 번역이 단어 단위로 차오르게 (openai/ollama는 진짜 토큰, codex는 통짜).
+    let acc = "";
+    setTranslations((m) => ({ ...m, [key]: "" }));   // 빈 문자열로 점유 → 재요청 방지
+    api.streamTranslate(pending.text, transLang, {
+      onDelta: (d) => { acc += d; setTranslations((m) => ({ ...m, [key]: acc })); },
+      onDone: () => { setTranslations((m) => ({ ...m, [key]: acc.trim() })); translatingRef.current = false; },
+      onError: () => { translatingRef.current = false; },
+    });
+  }, [displayMode, watchOpen, transLang, transcript, translations]);
 
   // 패널 분할 드래그(리사이즈 핸들러)
   const splitRef = useRef<HTMLDivElement | null>(null);
@@ -306,6 +333,7 @@ export default function App() {
     return () => clearInterval(t);
   }, [status?.stt_ready, refreshStatus]);
   useEffect(() => { document.documentElement.classList.toggle("dark", dark); }, [dark]);
+  useEffect(() => { loadAppFont(); }, []);   // 저장된 사용자 글꼴 적용
   useEffect(() => { api.setLang(lang); }, [lang]);  // 백엔드 응답 언어 동기화
   useEffect(() => { feedEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [feed]);
   useEffect(() => { transEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [transcript]);
@@ -467,25 +495,15 @@ export default function App() {
   const onInterim = useCallback(async (blob: Blob) => {
     if (interimBusyRef.current) return;          // 직전 초안 처리 중이면 건너뜀
     interimBusyRef.current = true;
-    try { const t = await api.transcribe(blob); if (t) setDraft(t); }
+    try { const r = await api.transcribe(blob); if (r.text) setDraft(r.text); }
     catch { /* ignore */ }
     finally { interimBusyRef.current = false; }
   }, []);
 
-  const onUtterance = useCallback(async (blob: Blob) => {
-    let text = "";
-    const mid = meetingIdRef.current;
-    setDraft("");   // 엔드포인트 도달 → 초안 지우고 최종(정제) 라인으로 교체
-    try { text = await api.transcribe(blob, mid, source); }
-    catch {
-      // 전사 실패를 조용히 삼키면 "마이크는 켜졌는데 아무 반응 없음"으로 보인다.
-      // 8초에 한 번만 알려 토스트 폭주는 막는다.
-      const now = Date.now();
-      if (now - sttErrRef.current > 8000) { sttErrRef.current = now; flash(t("toast.sttFail")); }
-      return;
-    }
+  // 전사된 한 발화를 처리: 화면 표시 + 라우팅(judge/act). 저장은 서버가 담당(REST·ws 공통).
+  // 배치(onUtterance)와 realtime 확정(onCommitted)이 공유한다.
+  const ingestUtterance = useCallback(async (text: string, mid: string) => {
     if (!text) return;
-    // 전사는 서버가 meeting 폴더에 실시간 누적 + 롤링 요약으로 맥락 유지(여기선 표시만).
     transcriptRef.current = [...transcriptRef.current, text];
     setTranscript((t) => [...t, { id: newId(), text }].slice(-200));
     const histCtx = historyRef.current.slice(-12).join("\n");
@@ -493,8 +511,8 @@ export default function App() {
     // wakeword("재키"/"자비스"/"고스트")로 부르면 음성으로 응답한다.
     const wake = WAKE_RE.test(text);
     const q = wake ? text.replace(WAKE_RE, "").trim() : text;
-    // 인터뷰 모드: 카드가 초점이 아니므로 비-호명 발화는 라우팅(judge) 생략 → codex를 번역에 양보(거의 실시간).
-    if (displayMode === "interview" && !wake) return;
+    // 인터뷰·워치 모드: 카드가 초점이 아니므로 비-호명 발화는 라우팅(judge) 생략 → codex를 번역에 양보(거의 실시간).
+    if ((displayMode === "interview" || watchOpenRef.current) && !wake) return;
     let r: api.Route;
     try { r = await api.route(wake ? q || text : text, histCtx, mid); } catch { return; }
     if (r.kind === "chat") { showChat(q || text, r.say || ""); if (wake && r.say) speak(r.say); return; }
@@ -515,7 +533,34 @@ export default function App() {
     if (actingRef.current || queueRef.current.length) return;
     liveCardRef.current = Date.now();
     startAction(qq, r.say || "", historyRef.current.join("\n"), false);
-  }, [showChat, startAction, pushHistory, speak, t, source, liveSens, displayMode]);
+  }, [showChat, startAction, pushHistory, speak, liveSens, displayMode]);
+
+  // 배치 경로: VAD 엔드포인트 → WAV를 REST 전사 → ingest. (parakeet/로컬/클라우드 배치 공통)
+  const onUtterance = useCallback(async (blob: Blob) => {
+    const mid = meetingIdRef.current;
+    setDraft("");   // 엔드포인트 도달 → 초안 지우고 최종(정제) 라인으로 교체
+    let text = "";
+    try {
+      const r = await api.transcribe(blob, mid, source);
+      text = r.text;
+      if (r.model) setEngineUsed({ model: r.model, engine: r.engine || "", provider: r.provider || "", fallback: !!r.fallback });
+    }
+    catch {
+      // 전사 실패를 조용히 삼키면 "마이크는 켜졌는데 아무 반응 없음"으로 보인다.
+      // 8초에 한 번만 알려 토스트 폭주는 막는다.
+      const now = Date.now();
+      if (now - sttErrRef.current > 8000) { sttErrRef.current = now; flash(t("toast.sttFail")); }
+      return;
+    }
+    await ingestUtterance(text, mid);
+  }, [ingestUtterance, source, t]);
+
+  // realtime 확정 경로(ElevenLabs Scribe v2 Realtime): ws committed_transcript → ingest.
+  // 저장은 서버 브리지가 하므로 여기선 표시+라우팅만. 배치 REST는 돌지 않아 이중 과금 없음.
+  const onCommitted = useCallback((text: string) => {
+    setDraft("");
+    ingestUtterance(text.trim(), meetingIdRef.current);
+  }, [ingestUtterance]);
 
   const toggleActive = useCallback(async () => {
     if (active) {
@@ -533,25 +578,28 @@ export default function App() {
       try { const m = await api.startMeeting(); meetingIdRef.current = m.id; setMeetingTitle(m.title); setMeetingFolder(m.folder || ""); }
       catch { meetingIdRef.current = ""; }
       setActive(true);
-      // 스트리밍 가능 여부를 '시작 시점에' 백엔드에 직접 물어 권위 있게 결정(옛 ref 의존 X).
-      let native = false, interimCapable = false;
-      try {
-        const ss = await api.getSttStreaming();   // parakeet-mlx 설치 + parakeet 모델 + 다운로드 + 로컬
-        native = !!ss.available;
-        const mdls = await api.getSttModels();
-        interimCapable = status?.stt_provider !== "elevenlabs" && !!mdls?.local.find((x) => x.id === mdls.local_active)?.streaming;
-      } catch { /* 폴백: 2-pass */ }
-      streamingSttRef.current = interimCapable; nativeStreamRef.current = native;
+      // 스트리밍 경로를 '시작 시점에' 백엔드에 직접 물어 권위 있게 결정(옛 ref 의존 X).
+      //   · "elevenlabs" → Scribe v2 Realtime ws: 확정 라인까지 ws가 주도(배치 REST 없음 → 이중 과금 X)
+      //   · "parakeet"   → 로컬 네이티브 ws: 라이브 초안만, 최종 라인은 배치 REST
+      //   · null         → 2-pass interim 초안(모든 모델/제공자) + 배치 REST 최종
+      let kind: api.StreamKind = null;
+      try { const ss = await api.getSttStreaming(); kind = ss.available ? (ss.kind ?? null) : null; }
+      catch { /* 폴백: interim 2-pass */ }
+      const ws = kind ? api.sttWsUrl(meetingIdRef.current, source) : null;
+      const realtime = kind === "elevenlabs";   // ws committed가 확정 라인을 주도
+      streamingSttRef.current = !kind; nativeStreamRef.current = !!kind;
+      if (realtime) setEngineUsed({ model: "scribe_v2_realtime", engine: "elevenlabs-realtime", provider: "elevenlabs", fallback: false });
       await start(
-        onUtterance,
-        interimCapable && !native ? onInterim : null,   // 네이티브면 interim-blob 대신 ws
+        realtime ? null : onUtterance,             // realtime은 ws committed가 최종 → 배치 비활성
+        kind ? null : onInterim,                    // ws가 있으면 interim-blob 대신 ws 부분결과
         source, source === "mic" ? micId || undefined : undefined,
-        native ? api.sttWsUrl() : null,
-        native ? setDraft : null,                                 // ws 부분결과 → 라이브 초안
+        ws,
+        kind ? setDraft : null,                     // ws 부분결과 → 라이브 초안
+        realtime ? onCommitted : null,              // realtime ws 확정 → 최종 라인 + 라우팅
       );
     }
     catch (e) { setActive(false); flash(t(captureErrKey(e))); }
-  }, [active, start, stop, onUtterance, onInterim, source, micId, t, status?.stt_provider]);
+  }, [active, start, stop, onUtterance, onInterim, onCommitted, source, micId, t]);
 
   // @[제목] 참조를 풀어 해당 지난 회의 요약을 쿼리에 덧붙인다.
   const resolveRefs = useCallback(async (q: string): Promise<string> => {
@@ -575,13 +623,13 @@ export default function App() {
     pushHistory(`요청: ${q}`);
     // 회의록/이미지 요청은 회의록 생성 경로(실제 이미지)로
     if (isMinutesReq(q) && transcriptRef.current.length) { generateMinutes("네, 전체 회의록과 손글씨 이미지까지 정리해 드릴게요."); return; }
+    // 순수 인사는 네트워크 없이 즉답(로컬 정규식).
+    if (CHAT_RE.test(q)) { showChat(q, ""); return; }
     const qResolved = await resolveRefs(q);   // @[지난 회의] 참조 주입
-    const histCtx = historyRef.current.slice(-12).join("\n");
-    let r: api.Route | null = null;
-    try { r = await api.route(qResolved, histCtx, meetingIdRef.current); } catch { /* fall through */ }
-    if (r?.kind === "chat") { showChat(q, r.say || ""); return; }
+    // 수동 입력 = 명시 요청 → judge(코덱스 라우팅 1회) 생략하고 바로 act.
+    // 라이브(자동 개입)와 달리 분류가 불필요 → 이중 codex 왕복 제거(카드 체감 2~3초↓).
     if (actingRef.current || queueRef.current.length) { flash(t("toast.busy")); return; }
-    startAction(r?.query || qResolved, r?.say || "", historyRef.current.join("\n"));
+    startAction(qResolved, "", historyRef.current.join("\n"));
   }, [showChat, startAction, pushHistory, pushFeed, generateMinutes, resolveRefs, t]);
 
   const chooseBackend = useCallback(async (b: string) => {
@@ -711,7 +759,7 @@ export default function App() {
       if (mod && e.key.toLowerCase() === "l") { e.preventDefault(); toggleActive(); }
       else if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); inputRef.current?.focus(); }
       else if (mod && e.key === "/") { e.preventDefault(); setHelpOpen((v) => !v); }
-      else if (e.key === "Escape") { setHelpOpen(false); setMenuOpen(false); }
+      else if (e.key === "Escape") { setHelpOpen(false); setMenuOpen(false); setAdminOpen(false); }
       else if (!typing && e.key === " ") { e.preventDefault(); toggleActive(); }
     };
     window.addEventListener("keydown", onKey);
@@ -775,6 +823,8 @@ export default function App() {
           </div>
           <button onClick={() => setHelpOpen(true)} title={t("header.help")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><HelpCircle className="size-4" /></button>
           <button onClick={() => setMenuOpen(true)} title="설정·관리" className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><SlidersHorizontal className="size-3.5" /> {t("header.menu")}</button>
+          <button onClick={() => setAdminOpen(true)} title={t("header.admin")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><LayoutDashboard className="size-3.5" /> {t("header.admin")}</button>
+          <button onClick={() => { setSource("system"); setWatchOpen(true); }} title={t("header.watch")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><MonitorPlay className="size-3.5" /> {t("header.watch")}</button>
           <button onClick={() => setVoiceOn((v) => !v)} title={voiceOn ? t("header.voiceOff") : t("header.voiceOn")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground">{voiceOn ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}</button>
           <button onClick={() => setDark((d) => !d)} title={t("header.theme")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground">{dark ? <Moon className="size-4" /> : <Sun className="size-4" />}</button>
         </div>
@@ -855,6 +905,15 @@ export default function App() {
           <div className="flex items-center gap-2 border-y border-hairline/60 bg-surface-soft/50 px-4 py-2">
             <Waveform active={active} level={level} bars={20} />
             <span className="ml-auto flex items-center gap-2 text-[11px] text-stone">
+              {engineUsed && (
+                <span
+                  title={`전사 엔진: ${engineUsed.model}${engineUsed.fallback ? " (클라우드 실패 → 로컬 폴백)" : ""}`}
+                  className="flex items-center gap-1 rounded-full border border-hairline bg-surface px-2 py-0.5 font-medium text-steel"
+                >
+                  <span className={`size-1.5 rounded-full ${engineUsed.fallback ? "bg-[#e9a23b]" : "bg-spark"}`} />
+                  {engineLabel(engineUsed)}
+                </span>
+              )}
               {active && <span className="font-mono tabular-nums text-steel">{fmtTime(elapsed)}</span>}
               {status && !status.stt_ready ? t("trans.loadingModel") : demoOn ? t("trans.demoPlaying") : active ? (speaking ? t("trans.listening") : t("trans.waiting")) : t("trans.off")}
             </span>
@@ -986,7 +1045,7 @@ export default function App() {
                   ) : it.spec ? (
                     <>
                       {it.ack && it.status === "done" && <p className="mb-2.5 text-[12.5px] leading-relaxed text-steel">{it.ack}</p>}
-                      <GenUI spec={it.spec} />
+                      <GenUI spec={it.spec} onAction={runManual} />
                       <div className="mt-3 flex items-center gap-2">
                         {it.backend && <span className="inline-flex items-center gap-1 text-[11px] text-stone">{/Codex/.test(it.backend) ? <BrandIcon name="codex" size={11} /> : /OpenAI/.test(it.backend) ? <BrandIcon name="openai" size={11} /> : null}{it.backend}</span>}
                         {it.spec.spoken && <button onClick={() => speak(it.spec!.spoken)} className="ml-auto inline-flex items-center gap-1 text-[11px] text-steel hover:text-foreground"><Volume2 className="size-3" /> {t("card.listen")}</button>}
@@ -1078,6 +1137,32 @@ export default function App() {
         liveSens={liveSens} setLiveSens={setLiveSens}
         autoResearch={autoResearch} setAutoResearch={setAutoResearch}
         onOpenMeeting={(title, spec) => pushFeed({ kind: "card", id: newId(), query: title, status: "done", progress: [], spec, pinned: true })} />
+
+      {/* 전체화면 관리자 페이지 — 회의 아카이브 + 모델·커넥터·용어집·저장 설정 (메인은 캡처에 집중) */}
+      <SettingsMenu variant="page" open={adminOpen} onClose={() => setAdminOpen(false)} status={status}
+        onStatus={setStatus}
+        onReplayGuide={() => { setAdminOpen(false); setOnboard(true); }}
+        digestMin={digestMin} setDigestMin={setDigestMin}
+        liveSens={liveSens} setLiveSens={setLiveSens}
+        autoResearch={autoResearch} setAutoResearch={setAutoResearch}
+        onOpenMeeting={(title, spec) => { setAdminOpen(false); pushFeed({ kind: "card", id: newId(), query: title, status: "done", progress: [], spec, pinned: true }); }} />
+
+      {/* YouTube 워치 모드 — 임베드 영상 + 시스템오디오 STT 스크립트·번역 + 플로팅 고스트 챗 */}
+      <WatchView
+        open={watchOpen}
+        onClose={() => { if (active) toggleActive(); setWatchOpen(false); setSource("mic"); }}
+        active={active}
+        onToggleListen={toggleActive}
+        transcript={transcript}
+        translations={translations}
+        transLang={transLang}
+        setTransLang={setTransLang}
+        transLangs={transLangs}
+        draft={draft}
+        cards={feed.filter((x): x is CardItem => x.kind === "card").slice(-4)}
+        onAsk={runManual}
+        t={t}
+      />
 
       <Onboarding
         open={onboard}

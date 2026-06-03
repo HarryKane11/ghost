@@ -22,11 +22,34 @@ function firstExisting(names, dirs = BIN_DIRS) {
   return names[0];
 }
 
+// 이 빌드가 기대하는 백엔드 버전 마커. 앱이 띄운 백엔드만 이 값을 health에 보고한다.
+function expectedBuild() {
+  try { return app.getVersion(); } catch { return "dev"; }
+}
+
 function backendEnv() {
   const env = { ...process.env };
   // GUI 앱은 셸 PATH를 상속하지 않으므로 보강 (uv·ollama·codex·ffmpeg 탐색)
   env.PATH = [...BIN_DIRS, env.PATH || ""].join(":");
+  env.GHOST_BUILD = expectedBuild();   // /api/health가 echo → '내 백엔드' 식별
   return env;
+}
+
+/** /api/health의 version을 반환(고스트 백엔드가 아니거나 응답 없으면 null). */
+function backendHealth() {
+  return new Promise((resolve) => {
+    const req = http.get(
+      { host: "127.0.0.1", port: BACKEND_PORT, path: "/api/health", timeout: 800 },
+      (res) => {
+        if (res.statusCode !== 200) { res.resume(); return resolve(null); }
+        let body = "";
+        res.on("data", (c) => (body += c));
+        res.on("end", () => { try { resolve(JSON.parse(body).version || "dev"); } catch { resolve("dev"); } });
+      }
+    );
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => { req.destroy(); resolve(null); });
+  });
 }
 
 function backendAlive() {
@@ -40,20 +63,32 @@ function backendAlive() {
   });
 }
 
+/** 8765를 점유한 '옛/외부' 고스트 백엔드를 회수(종료). macOS: lsof로 PID 찾아 kill. best-effort. */
+function reclaimPort() {
+  return new Promise((resolve) => {
+    try {
+      const r = spawn("/bin/sh", ["-c", `lsof -ti tcp:${BACKEND_PORT} | xargs kill 2>/dev/null; sleep 1`], { stdio: "ignore" });
+      r.on("close", () => resolve());
+      r.on("error", () => resolve());
+    } catch { resolve(); }
+  });
+}
+
 /** 패키징 시 번들된 백엔드를 쓰기 가능한 위치로 복사하고 그 경로를 반환. */
 function resolveBackendDir() {
   if (!app.isPackaged) return path.join(__dirname, "..", "..", "local");
   const src = path.join(process.resourcesPath, "backend");
   const dst = path.join(app.getPath("userData"), "backend");
   try {
-    const srcLock = path.join(src, "uv.lock");
-    const dstLock = path.join(dst, "uv.lock");
-    const needCopy =
-      !fs.existsSync(dstLock) ||
-      (fs.existsSync(srcLock) &&
-        fs.statSync(srcLock).mtimeMs > fs.statSync(dstLock).mtimeMs);
+    // 갱신 판단: uv.lock(의존성) 또는 server.py(코드)가 번들 쪽이 더 새것이면 다시 복사.
+    // (같은 버전으로 재빌드해 lock은 그대로지만 .py만 바뀐 경우도 갱신되게 server.py도 본다.)
+    const newer = (name) => {
+      const s = path.join(src, name), dd = path.join(dst, name);
+      return fs.existsSync(s) && (!fs.existsSync(dd) || fs.statSync(s).mtimeMs > fs.statSync(dd).mtimeMs);
+    };
+    const needCopy = !fs.existsSync(path.join(dst, "uv.lock")) || newer("uv.lock") || newer("server.py");
     if (needCopy) {
-      fs.cpSync(src, dst, { recursive: true });
+      fs.cpSync(src, dst, { recursive: true });   // .venv는 src에 없어 보존됨(코드만 갱신)
     }
   } catch (e) {
     console.error("[backend] copy failed:", e.message);
@@ -62,7 +97,15 @@ function resolveBackendDir() {
 }
 
 async function ensureBackend() {
-  if (await backendAlive()) return;
+  const ver = await backendHealth();
+  if (ver !== null) {
+    // 개발 모드는 개발자가 띄운 백엔드를 그대로 쓴다(버전 강제 X).
+    if (!app.isPackaged) return;
+    // 패키징 모드: 내 빌드의 백엔드면 재사용, 아니면(옛/외부 백엔드가 포트 점유) 회수 후 내 것 기동.
+    if (ver === expectedBuild()) return;
+    console.error(`[backend] foreign/old backend on ${BACKEND_PORT} (version=${ver}, expected=${expectedBuild()}) → reclaiming`);
+    await reclaimPort();
+  }
   const cwd = resolveBackendDir();
   const uv = firstExisting(["uv"]);
   backendProc = spawn(

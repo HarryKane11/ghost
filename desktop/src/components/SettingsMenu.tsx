@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines, Volume2, ChevronRight, Download } from "lucide-react";
+import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines, Volume2, ChevronRight, ChevronLeft, Download, Search } from "lucide-react";
 import * as api from "@/lib/api";
 import type { Spec } from "@/components/GenUI";
 import { BrandIcon, hasBrand, EntityIcon, hasEntityIcon } from "@/components/BrandIcon";
+import { FontSettings } from "@/components/FontSettings";
+import { UsageDashboard } from "@/components/UsageDashboard";
 import { useT, LANGS } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Languages } from "lucide-react";
@@ -15,6 +17,7 @@ const APP_VERSION =
 export function SettingsMenu({
   open, onClose, status, onOpenMeeting, onReplayGuide, onStatus,
   digestMin, setDigestMin, liveSens, setLiveSens, autoResearch, setAutoResearch,
+  variant = "drawer",
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,7 +31,10 @@ export function SettingsMenu({
   setLiveSens: (v: "off" | "conservative" | "eager") => void;
   autoResearch: boolean;
   setAutoResearch: (v: boolean) => void;
+  variant?: "drawer" | "page";   // drawer=빠른 설정 드롭다운, page=전체화면 관리자 페이지
 }) {
+  const page = variant === "page";
+  const [mq, setMq] = useState("");   // 회의 아카이브 검색어(page 변형)
   const { t, lang, setLang } = useT();
   const [connectors, setConnectors] = useState<{ name: string; status: string }[]>([]);
   const [tools, setTools] = useState<{ name: string; desc: string; on: boolean }[]>([]);
@@ -172,20 +178,34 @@ export function SettingsMenu({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/20 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className={page
+        ? "fixed inset-0 z-50 flex flex-col bg-canvas"
+        : "fixed inset-0 z-50 flex items-start justify-center bg-ink/20 backdrop-blur-sm"}
+      onClick={page ? undefined : onClose}
+    >
       <div
-        className="mt-16 max-h-[80vh] w-[560px] overflow-y-auto rounded-2xl border border-hairline bg-canvas p-5 shadow-2xl"
+        className={page
+          ? "mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-6 py-5"
+          : "mt-16 max-h-[80vh] w-[560px] overflow-y-auto rounded-2xl border border-hairline bg-canvas p-5 shadow-2xl"}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold tracking-tight">{t("settings.title")}</h2>
+        <div className={cn("mb-4 flex items-center justify-between", page && "sticky top-0 z-10 -mx-6 -mt-5 border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur")}>
+          <div className="flex items-center gap-2">
+            {page && (
+              <button onClick={onClose} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground">
+                <ChevronLeft className="size-4" /> {t("admin.back")}
+              </button>
+            )}
+            <h2 className="text-[15px] font-semibold tracking-tight">{page ? t("admin.title") : t("settings.title")}</h2>
+          </div>
           <div className="flex items-center gap-1">
             {onReplayGuide && (
               <button onClick={onReplayGuide} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground">
                 <Compass className="size-3.5" /> {t("settings.replayGuide")}
               </button>
             )}
-            <button onClick={onClose} className="text-stone hover:text-foreground"><X className="size-4.5" /></button>
+            {!page && <button onClick={onClose} className="text-stone hover:text-foreground"><X className="size-4.5" /></button>}
           </div>
         </div>
 
@@ -223,6 +243,10 @@ export function SettingsMenu({
             </div>
           );
         })()}
+
+        {/* 관리자 전용: 사용량·비용 대시보드 + 글꼴 설정 */}
+        {page && <UsageDashboard t={t} />}
+        {page && <FontSettings t={t} />}
 
         {/* 언어 */}
         <Section icon={<Languages className="size-4 text-steel" />} title={t("settings.language")}>
@@ -586,10 +610,19 @@ export function SettingsMenu({
             <div className="text-[12.5px] text-stone">{t("settings.meetingsEmpty")}</div>
           ) : (
             <div className="space-y-3">
+              {meetings.length > 4 && (
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-stone" />
+                  <input value={mq} onChange={(e) => setMq(e.target.value)} placeholder={t("admin.searchMeetings")}
+                    className="h-8 w-full rounded-lg border border-hairline bg-surface-soft pl-8 pr-2.5 text-[12.5px] text-charcoal outline-none placeholder:text-stone focus:border-ink/40" />
+                </div>
+              )}
               {(() => {
                 const fmtDur = (s?: number | null) => (s == null ? "" : s < 60 ? `${s}s` : `${Math.floor(s / 60)}m`);
+                const q = mq.trim().toLowerCase();
+                const filtered = q ? meetings.filter((m) => (m.title || "").toLowerCase().includes(q) || (m.folder || "").toLowerCase().includes(q)) : meetings;
                 const groups: Record<string, api.MeetingMeta[]> = {};
-                for (const m of meetings) (groups[m.folder || ""] ||= []).push(m);
+                for (const m of filtered) (groups[m.folder || ""] ||= []).push(m);
                 const folders = Object.keys(groups).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
                 const openMeeting = async (m: api.MeetingMeta) => {
                   const full = await api.getMeeting(m.id);

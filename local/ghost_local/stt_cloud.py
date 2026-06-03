@@ -12,10 +12,14 @@ ELEVEN_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 # ElevenLabs language_code(ISO-639-1) 매핑
 _LANG = {"ko": "ko", "en": "en", "zh": "zh"}
 
-# 선택 가능한 클라우드 STT 모델(파일 업로드 REST 경로). 실시간(websocket)은 별도 통합 필요.
+# 선택 가능한 클라우드 STT 모델.
+#   · scribe_v2/v1 : 파일 업로드 REST(발화 끝나면 배치 전사)
+#   · scribe_v2_realtime : WebSocket 실시간 스트리밍(부분 결과를 토큰처럼 흘림) — streaming 전용
+REALTIME_MODEL = "scribe_v2_realtime"
 CLOUD_MODELS = [
-    {"id": "scribe_v2", "label": "Scribe v2 · 최신·고정확 (기본)"},
-    {"id": "scribe_v1", "label": "Scribe v1 · 안정"},
+    {"id": "scribe_v2_realtime", "label": "Scribe v2 Realtime · 실시간 스트리밍", "streaming": True, "realtime": True},
+    {"id": "scribe_v2", "label": "Scribe v2 · 최신·고정확 (배치)"},
+    {"id": "scribe_v1", "label": "Scribe v1 · 안정 (배치)"},
 ]
 DEFAULT_CLOUD_MODEL = "scribe_v2"
 _active: dict = {"model": DEFAULT_CLOUD_MODEL}
@@ -23,6 +27,11 @@ _active: dict = {"model": DEFAULT_CLOUD_MODEL}
 
 def active_model() -> str:
     return _active["model"]
+
+
+def realtime_active() -> bool:
+    """현재 클라우드 모델이 WebSocket 실시간 스트리밍 모델인지."""
+    return _active["model"] == REALTIME_MODEL
 
 
 def set_model(model_id: str) -> str:
@@ -45,7 +54,11 @@ def transcribe(audio_path: str, lang: Optional[str] = None, timeout: int = 60, m
     key = elevenlabs_key()
     if not key:
         raise RuntimeError("ELEVENLABS_API_KEY not set")
-    data = {"model_id": model_id or active_model()}
+    # realtime 모델은 ws 전용 → REST 배치(폴백·인터림)에선 동급 배치 모델로 대체.
+    model = model_id or active_model()
+    if model == REALTIME_MODEL:
+        model = "scribe_v2"
+    data = {"model_id": model}
     code = _LANG.get(lang or "")
     if code:
         data["language_code"] = code

@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import {
   Link2, Quote, ArrowUpRight, Info, TriangleAlert, CircleCheck, CircleX,
+  ChevronDown, ArrowRight,
 } from "lucide-react";
+
+/** 카드 내 버튼/액션 클릭 → 후속 질의를 앱 라우팅으로 되먹임(인터랙티브 루프). */
+const ActionCtx = createContext<((query: string) => void) | null>(null);
 
 /** 깨진/없는 이미지 URL이면 조용히 숨긴다 (회의록 외 image 블록 깨짐 방지) */
 function ImageBlock({ url, label }: { url?: string; label?: string }) {
@@ -152,6 +156,102 @@ const CALLOUT = {
   error: { icon: CircleX, cls: "border-[#e9b0b0] bg-[#fdeeee] text-[#b04141]" },
 } as const;
 
+// ── 인터랙티브 블록 ──────────────────────────────────────────────────────────
+/** 접이식 섹션. items: ["제목 | 내용", …]. 긴 카드를 접어 정보 밀도↓. */
+function Accordion({ label, items }: { label?: string; items: string[] }) {
+  const rows = items.map((s) => { const [h, ...r] = s.split("|"); return { head: h.trim(), body: r.join("|").trim() }; }).filter((x) => x.head);
+  const [open, setOpen] = useState<number | null>(0);
+  if (!rows.length) return null;
+  return (
+    <div className="overflow-hidden rounded-xl border border-hairline">
+      {label && <div className="border-b border-hairline bg-surface-soft px-3 py-1.5 text-[11px] font-medium text-steel">{label}</div>}
+      {rows.map((r, i) => (
+        <div key={i} className="border-b border-hairline last:border-b-0">
+          <button onClick={() => setOpen(open === i ? null : i)}
+            className="flex w-full items-center justify-between gap-2 px-3.5 py-2 text-left text-[13px] font-medium text-foreground hover:bg-surface-soft">
+            <span>{r.head}</span>
+            <ChevronDown className={`size-3.5 shrink-0 text-stone transition-transform ${open === i ? "rotate-180" : ""}`} />
+          </button>
+          {open === i && <div className="px-3.5 pb-2.5 text-[12.5px] leading-relaxed text-charcoal">{r.body}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 탭. items: ["탭명 | 내용", …]. */
+function Tabs({ items }: { items: string[] }) {
+  const tabs = items.map((s) => { const [h, ...r] = s.split("|"); return { head: h.trim(), body: r.join("|").trim() }; }).filter((x) => x.head);
+  const [active, setActive] = useState(0);
+  if (!tabs.length) return null;
+  return (
+    <div className="rounded-xl border border-hairline">
+      <div className="flex gap-1 border-b border-hairline bg-surface-soft px-1.5 pt-1.5">
+        {tabs.map((tb, i) => (
+          <button key={i} onClick={() => setActive(i)}
+            className={`rounded-t-lg px-3 py-1.5 text-[12px] font-medium transition-colors ${active === i ? "bg-canvas text-foreground" : "text-stone hover:text-steel"}`}>
+            {tb.head}
+          </button>
+        ))}
+      </div>
+      <div className="px-3.5 py-2.5 text-[13px] leading-relaxed text-charcoal">{tabs[active]?.body}</div>
+    </div>
+  );
+}
+
+/** 체크리스트(로컬 토글). items: ["할 일", …]. */
+function Checklist({ items }: { items: string[] }) {
+  const [done, setDone] = useState<Set<number>>(new Set());
+  if (!items.length) return null;
+  return (
+    <ul className="space-y-1">
+      {items.map((it, i) => {
+        const on = done.has(i);
+        return (
+          <li key={i}>
+            <button onClick={() => setDone((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; })}
+              className="flex w-full items-start gap-2 text-left text-[13px] leading-relaxed">
+              <span className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[5px] border transition-colors ${on ? "border-spark bg-spark text-white" : "border-hairline bg-surface"}`}>
+                {on && <CircleCheck className="size-3" />}
+              </span>
+              <span className={on ? "text-stone line-through" : "text-charcoal"}>{it}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** 액션 버튼 — 클릭 시 후속 질의를 앱으로 되먹임. items: ["라벨 | 질의"] 또는 ["라벨"](라벨=질의). */
+function Actions({ items }: { items: string[] }) {
+  const onAction = useContext(ActionCtx);
+  const acts = items.map((s) => { const [lab, ...q] = s.split("|"); const label = lab.trim(); const query = (q.join("|").trim() || label); return { label, query }; }).filter((x) => x.label);
+  if (!acts.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {acts.map((a, i) => (
+        <button key={i} disabled={!onAction} onClick={() => onAction?.(a.query)}
+          className="group inline-flex items-center gap-1.5 rounded-full border border-spark-soft bg-[color-mix(in_srgb,var(--spark)_8%,transparent)] px-3 py-1.5 text-[12px] font-medium text-spark-deep transition-colors hover:bg-[color-mix(in_srgb,var(--spark)_16%,transparent)] disabled:opacity-50">
+          {a.label}
+          <ArrowRight className="size-3 shrink-0 transition-transform group-hover:translate-x-0.5" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 코드 블록(모노스페이스). label=언어. */
+function CodeBlock({ text, label }: { text: string; label?: string }) {
+  if (!text) return null;
+  return (
+    <div className="overflow-hidden rounded-xl border border-hairline bg-[#0f1115]">
+      {label && <div className="border-b border-white/10 px-3 py-1 text-[10.5px] font-medium uppercase tracking-wide text-white/40">{label}</div>}
+      <pre className="overflow-x-auto px-3.5 py-2.5 text-[12px] leading-relaxed text-[#e6e6e6]"><code>{text}</code></pre>
+    </div>
+  );
+}
+
 // ── 블록 렌더러 레지스트리 ───────────────────────────────────────────────────
 function BlockView({ b }: { b: Block }) {
   switch (b.type) {
@@ -301,6 +401,16 @@ function BlockView({ b }: { b: Block }) {
       );
     case "image":
       return <ImageBlock url={b.url} label={b.label} />;
+    case "accordion":
+      return <Accordion label={b.label} items={b.items || []} />;
+    case "tabs":
+      return <Tabs items={b.items || []} />;
+    case "checklist":
+      return <Checklist items={b.items || []} />;
+    case "actions":
+      return <Actions items={b.items || []} />;
+    case "code":
+      return <CodeBlock text={b.text || ""} label={b.label} />;
     case "handwritten": {
       const ko = isKorean(b.text || "");
       return (
@@ -327,9 +437,10 @@ function groupBlocks(blocks: Block[]) {
   return groups;
 }
 
-export function GenUI({ spec }: { spec: Spec }) {
+export function GenUI({ spec, onAction }: { spec: Spec; onAction?: (query: string) => void }) {
   const groups = groupBlocks(spec.blocks || []);
   return (
+    <ActionCtx.Provider value={onAction ?? null}>
     <div className="space-y-3">
       {groups.map((g, gi) =>
         g.kind === "stats" ? (
@@ -341,5 +452,6 @@ export function GenUI({ spec }: { spec: Spec }) {
         )
       )}
     </div>
+    </ActionCtx.Provider>
   );
 }

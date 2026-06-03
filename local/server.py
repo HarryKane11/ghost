@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from ghost_local import brain, memory, stt, stt_cloud, stt_stream, store, tts
+from ghost_local import brain, memory, stt, stt_cloud, stt_cloud_stream, stt_stream, store, tts
 
 
 def _load_dotenv() -> None:
@@ -579,6 +579,27 @@ def translate_ep(req: TranslateReq) -> dict:
     return {"text": brain.translate(req.text, name, _cfg())}
 
 
+@app.post("/api/translate/stream")
+def translate_stream_ep(req: TranslateReq) -> StreamingResponse:
+    """번역을 토큰 단위로 스트리밍(인터뷰 모드). ollama/openai는 진짜 델타, codex는 통짜 1청크."""
+    name = _LANG_NAME.get(req.target, req.target)
+    cfg = _cfg()
+
+    def gen():
+        try:
+            for delta in brain.translate_stream(req.text, name, cfg):
+                if delta:
+                    yield _sse("delta", {"text": delta})
+        except Exception as ex:  # noqa: BLE001
+            yield _sse("error", {"error": str(ex)})
+        yield _sse("done", {})
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/translate/langs")
 def translate_langs() -> dict:
     return {"langs": TRANSLATE_LANGS}
@@ -601,22 +622,49 @@ def set_glossary_ep(req: GlossaryReq) -> dict:
 
 @app.get("/api/stt/streaming")
 def stt_streaming() -> dict:
-    """현재 모델이 네이티브 토큰-스트리밍 가능한지(parakeet-mlx 설치 + parakeet 모델 + 다운로드됨)."""
+    """실시간 스트리밍 전사가 가능한 경로를 알려준다.
+
+    kind:
+      · "elevenlabs" — Scribe v2 Realtime(ws). 클라우드 + realtime 모델 + 키 있을 때.
+      · "parakeet"   — 로컬 네이티브 토큰-스트리밍(parakeet-mlx 설치 + 모델 다운로드).
+      · None         — 스트리밍 불가 → 클라가 2-pass interim 초안으로 폴백.
+    """
+    if (STATE.get("stt_provider") == "elevenlabs"
+            and stt_cloud.realtime_active() and stt_cloud.elevenlabs_key()):
+        return {"available": True, "kind": "elevenlabs", "model": stt_cloud.active_model()}
     mid = stt.active_model()
     ok = (STATE.get("stt_provider") != "elevenlabs"
           and stt_stream.streaming_supported(mid)
           and stt.model_present(mid))
-    return {"available": ok, "model": mid}
+    return {"available": ok, "kind": "parakeet" if ok else None, "model": mid}
 
 
 @app.websocket("/ws/stt")
 async def ws_stt(ws: WebSocket) -> None:
-    """연속 오디오(16k mono float32, binary) → parakeet 스트리밍 → 부분 결과를 실시간으로 돌려준다.
+    """연속 오디오(16k mono float32, binary) → 실시간 전사 → 부분/확정 결과를 돌려준다.
 
-    바이너리 프레임 = 오디오. 텍스트 '{"final":true}' = 엔드포인트(현재 가설 확정). 최종 정제 라인은
-    클라이언트의 배치 전사가 따로 담당하므로, 여기선 라이브 초안만 보낸다.
+    경로 선택:
+      · 클라우드 + Scribe v2 Realtime → ElevenLabs realtime ws로 브리지(확정 라인은 서버가 저장).
+      · 로컬 parakeet → 네이티브 토큰-스트리밍(라이브 초안만; 최종은 클라 배치가 담당).
+
+    바이너리 프레임 = 오디오. 텍스트 '{"final":true}' = 클라 VAD 엔드포인트 신호.
     """
     await ws.accept()
+    mid = ws.query_params.get("meeting_id", "")
+    src = ws.query_params.get("source", "mic")
+
+    # ── 1) ElevenLabs Scribe v2 Realtime (스트리밍 전용 옵션) ──
+    if (STATE.get("stt_provider") == "elevenlabs"
+            and stt_cloud.realtime_active() and stt_cloud.elevenlabs_key()):
+        def _store_committed(text: str) -> None:
+            # 확정 전사를 회의 폴더에 실시간 누적(REST 경로와 동일한 저장·fold).
+            if text and mid and store.get_meta(mid) is not None:
+                store.append_transcript(mid, text, source=src or "mic")
+                _bg_fold(mid)
+        await stt_cloud_stream.bridge(ws, STATE.get("lang"), stt_cloud.elevenlabs_key(), on_committed=_store_committed)
+        return
+
+    # ── 2) 로컬 parakeet 네이티브 스트리밍 ──
     import numpy as np
     loop = asyncio.get_running_loop()
     repo = stt._repo(stt.active_model())
@@ -673,6 +721,42 @@ def stt_engine_target() -> dict:
     return {"target": stt.install_target_for(stt.active_model())}
 
 
+# ── 사용량 대시보드 (Codex 토큰/비용 · ElevenLabs STT · 로컬 모델 디스크) ──────
+@app.get("/api/usage")
+def get_usage() -> dict:
+    """이 앱이 쓴 사용량: Codex 토큰/비용, ElevenLabs STT 시간/비용, 로컬 ASR 디스크 점유."""
+    from ghost_local import usage
+    snap = usage.snapshot()
+    models = stt.models_with_status()
+    local_total = sum(int(m.get("size_bytes") or 0) for m in models)
+    snap["local_models"] = [
+        {"id": m["id"], "label": m["label"], "present": m.get("present", False),
+         "size_bytes": m.get("size_bytes", 0), "approx_gb": m.get("approx_gb")}
+        for m in models
+    ]
+    snap["local_total_bytes"] = local_total
+    snap["rates"] = {"eleven_stt_usd_per_hour": usage.ELEVEN_STT_USD_PER_HOUR}
+    return snap
+
+
+class BudgetReq(BaseModel):
+    usd: float
+
+
+@app.post("/api/usage/budget")
+def set_usage_budget(req: BudgetReq) -> dict:
+    """Codex 월 예산(USD) 설정 → 한도 대비 차지율 표시용."""
+    from ghost_local import usage
+    return usage.set_codex_budget(req.usd)
+
+
+@app.post("/api/usage/reset")
+def reset_usage() -> dict:
+    """사용량 카운터 초기화."""
+    from ghost_local import usage
+    return usage.reset()
+
+
 @app.get("/api/stt/models")
 def stt_models() -> dict:
     """선택 가능한 로컬/클라우드 STT 모델 목록 + 현재 활성 모델."""
@@ -702,6 +786,17 @@ def _to_wav(src: str) -> str:
     dst = os.path.join(tempfile.gettempdir(), f"ghost_in_{uuid.uuid4().hex}.wav")
     subprocess.run(["ffmpeg", "-y", "-i", src, "-ar", "16000", "-ac", "1", dst], capture_output=True, check=False)
     return dst
+
+
+def _wav_seconds(path: str) -> float:
+    """WAV 길이(초). 사용량 추정용. 실패 시 0."""
+    try:
+        import wave
+        with wave.open(path, "rb") as w:
+            fr = w.getframerate() or 16000
+            return w.getnframes() / float(fr)
+    except Exception:  # noqa: BLE001
+        return 0.0
 
 
 def _looks_like_hallucination(text: str) -> bool:
@@ -737,12 +832,22 @@ async def transcribe(audio: UploadFile = File(...), meeting_id: str = Form(""), 
     with open(raw, "wb") as f:
         shutil.copyfileobj(audio.file, f)
     wav = _to_wav(raw)
+    # 실제로 어떤 경로(provider/model/engine)가 전사했는지 추적해 응답에 에코한다
+    # → 클라가 "지금 진짜 이 모델로 전사 중"을 배지로 보여줄 수 있다(모델 전환 신뢰성).
+    used = {"provider": "local", "model": stt.active_model(), "engine": stt._engine(stt.active_model())}
     try:
         if STATE.get("stt_provider") == "elevenlabs" and stt_cloud.elevenlabs_key():
             try:
                 text = stt_cloud.transcribe(wav, lang=STATE.get("lang"))
+                used = {"provider": "elevenlabs", "model": stt_cloud.active_model(), "engine": "elevenlabs"}
+                try:
+                    from ghost_local import usage
+                    usage.record_eleven_stt(_wav_seconds(wav))   # 전사한 오디오 길이 → 사용량/비용 누적
+                except Exception:  # noqa: BLE001
+                    pass
             except Exception:
                 text = stt.transcribe(wav)  # 클라우드 실패 시 로컬 폴백
+                used = {"provider": "local", "model": stt.active_model(), "engine": stt._engine(stt.active_model()), "fallback": True}
         else:
             text = stt.transcribe(wav)
     finally:
@@ -752,13 +857,13 @@ async def transcribe(audio: UploadFile = File(...), meeting_id: str = Form(""), 
             except OSError:
                 pass
     if _looks_like_hallucination(text):
-        return {"text": "", "filtered": True}
+        return {"text": "", "filtered": True, **used}
     # 전사 실시간 누적(회의 종료 안 기다림) + 충분히 쌓이면 백그라운드 fold.
     mid = (meeting_id or "").strip()
     if text and mid and store.get_meta(mid) is not None:
         store.append_transcript(mid, text, source=source or "mic")
         _bg_fold(mid)
-    return {"text": text}
+    return {"text": text, **used}
 
 
 # ── 라우팅 + 스트리밍 액션 ──────────────────────────────────────────────────
@@ -919,4 +1024,6 @@ def synth(req: TtsReq):
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True}
+    # version: 앱이 띄운 번들 백엔드만 GHOST_BUILD를 갖는다(데스크탑 앱이 주입).
+    # 외부/옛 백엔드(수동 uvicorn)는 이 값이 없어 "dev"로 보고, 앱이 '내 백엔드가 아님'을 판별한다.
+    return {"ok": True, "version": os.environ.get("GHOST_BUILD", "dev")}

@@ -69,8 +69,18 @@ def engine_available(engine: str) -> bool:
 
 
 def models_with_status() -> list:
-    """UI용 모델 목록 + 엔진 설치 여부."""
-    return [{**m, "engine_ready": engine_available(m.get("engine", "mlx"))} for m in LOCAL_MODELS]
+    """UI용 모델 목록 + 엔진 설치 여부 + 디스크 점유(다운로드된 실제 용량)."""
+    out = []
+    for m in LOCAL_MODELS:
+        repo = m.get("repo") or m["id"]
+        size = _dir_size(_hf_cache_dir(repo))
+        out.append({
+            **m,
+            "engine_ready": engine_available(m.get("engine", "mlx")),
+            "present": size > 0,
+            "size_bytes": size,   # 실제 다운로드된 디스크 용량(0이면 미다운로드)
+        })
+    return out
 
 
 # ── 인앱 설치 — 터미널 없이 앱에서 옵셔널 엔진(로컬 STT·스트리밍·TTS 등)을 설치 ──
@@ -141,11 +151,21 @@ def active_model() -> str:
 
 
 def set_model(model_id: str) -> str:
-    """활성 로컬 ASR 모델을 바꾼다(커스텀 HF repo도 허용). 다음 전사부터 적용."""
+    """활성 로컬 ASR 모델을 바꾼다(커스텀 HF repo도 허용). 다음 전사부터 적용.
+
+    전환 즉시 백그라운드 warmup을 걸어 '전환 후 첫 전사가 멈칫'하는 문제를 없앤다
+    (모델 로드가 단일 executor 직렬·lru_cache라, 미리 데워두면 체감 지연이 사라진다).
+    """
     mid = (model_id or "").strip()
-    if mid:
+    if mid and mid != _active["model"]:
         _active["model"] = mid
         _DL.update(state="idle", error=None)  # 새 모델 다운로드 상태 리셋
+        # mlx 엔진 + 의존성 설치 + 이미 다운로드돼 있으면 미리 로드(비차단).
+        try:
+            if _engine(mid) == "mlx" and engine_available("mlx") and model_present(mid):
+                _EXECUTOR.submit(_warmup_impl, mid)
+        except Exception:  # noqa: BLE001 — warmup 실패는 다음 전사에서 자연 재시도
+            pass
     return _active["model"]
 
 

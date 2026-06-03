@@ -52,7 +52,14 @@ ALLOWED_BLOCKS = (
     "  · progress {label, value:'0~100'}  — 비율/진행 바\n"
     "  · keyvalue {items:['키: 값', …]}  — 키-값 정의\n"
     "  · timeline {items:['시점 | 사건', …]}  — 타임라인\n"
-    "  · quote {text, label?:출처}  · link {label, url}  · image {url, label?}  · divider {}"
+    "  · quote {text, label?:출처}  · link {label, url}  · image {url, label?}  · divider {}\n"
+    "  ── 인터랙티브(정적 텍스트보다 우선해 적극 활용) ──\n"
+    "  · accordion {label?, items:['제목 | 내용', …]}  — 길거나 선택적 상세는 접어서. 정보 밀도↓\n"
+    "  · tabs {items:['탭명 | 내용', …]}  — 같은 주제의 여러 관점/항목을 탭으로\n"
+    "  · checklist {items[]}  — 사용자가 체크할 수 있는 할 일/준비물/점검 목록\n"
+    "  · actions {items:['버튼라벨 | 후속질의', …]}  — 다음에 물어볼 만한 후속 질문을 버튼으로. "
+    "클릭하면 그 '후속질의'가 즉시 실행된다. 카드 끝에 2~4개 제안하면 대화가 이어진다\n"
+    "  · code {text:코드, label?:언어}  — 코드/명령/설정은 반드시 이 블록으로(텍스트로 풀어쓰지 말 것)"
 )
 
 WORKLOAD_DECISION_RULES = (
@@ -81,6 +88,8 @@ ACT_SYSTEM = (
     "- spoken: 사용자에게 '말로' 전할 짧은 한국어 한 문장. 출처·URL·숫자나열은 절대 넣지 말 것. 말할 가치가 없으면 빈 문자열.\n"
     "- blocks: 위 컴포넌트를 풍부하게 조합. 단일 수치=stat, 여러 수치 비교/점유율/추이=chart, 표 형식=table, "
     "절차=steps, 주의·핵심=callout, 키-값=keyvalue, 일정=timeline, 출처=link. 데이터는 가급적 시각화.\n"
+    "- 인터랙티브를 적극 써라: 길면 accordion으로 접고, 여러 관점은 tabs로, 할 일은 checklist로, "
+    "코드/명령은 code로. 그리고 가능하면 카드 끝에 actions(후속 질문 버튼 2~4개)를 붙여 대화가 이어지게 하라.\n"
     "- image/handwritten 블록은 절대 쓰지 마라(이미지는 회의록 생성 전용 경로에서만 만든다). "
     "이미지를 만들 수 없으면 텍스트/표로 대신한다.\n"
     "- 한국어로.\n"
@@ -303,6 +312,68 @@ def _brain_json(system: str, user: str, cfg: "BrainConfig", timeout: int = 60) -
     return _codex_json(system, user, model=None, timeout=timeout)  # 분류는 경량 모델 고정
 
 
+def _ollama_text_stream(system: str, user: str, model: str = JUDGE_MODEL, timeout: int = 60):
+    """Ollama 토큰 스트리밍 — message.content 델타를 하나씩 yield."""
+    payload = json.dumps({
+        "model": model,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "stream": True,
+        "options": {"temperature": 0.3},
+    }).encode()
+    req = urllib.request.Request(
+        f"{OLLAMA_URL}/api/chat", data=payload, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        for raw in resp:  # newline-delimited JSON
+            line = raw.decode("utf-8").strip()
+            if not line:
+                continue
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ch = (o.get("message") or {}).get("content")
+            if ch:
+                yield ch
+            if o.get("done"):
+                break
+
+
+def _openai_text_stream(system: str, user: str, model: str = "gpt-5.4-mini", timeout: int = 60):
+    """OpenAI 토큰 스트리밍 — delta.content를 하나씩 yield."""
+    from openai import OpenAI
+    client = OpenAI()
+    stream = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        stream=True,
+    )
+    for chunk in stream:
+        try:
+            ch = chunk.choices[0].delta.content
+        except (IndexError, AttributeError):
+            ch = None
+        if ch:
+            yield ch
+
+
+def _brain_text_stream(system: str, user: str, cfg: "BrainConfig", timeout: int = 60):
+    """설정된 백엔드로 토큰 스트리밍.
+
+    · ollama / openai → 진짜 토큰 델타.
+    · codex → exec가 토큰 델타를 내보내지 않으므로(item 단위만) 통짜 결과를 1청크로 yield(우아한 강등).
+    """
+    if cfg.backend == "ollama":
+        yield from _ollama_text_stream(system, user, model=cfg.local_model, timeout=timeout)
+        return
+    if cfg.backend == "openai":
+        yield from _openai_text_stream(system, user, model=cfg.cloud_model, timeout=timeout)
+        return
+    out = _codex_text(system, user, model=None, timeout=timeout)
+    if out:
+        yield out
+
+
 def _brain_text(system: str, user: str, cfg: "BrainConfig", timeout: int = 60) -> str:
     if cfg.backend == "ollama":
         return _ollama_text(system, user, model=cfg.local_model, timeout=timeout)
@@ -427,6 +498,17 @@ def translate(text: str, target_name: str, cfg: Optional["BrainConfig"] = None) 
     sys = (f"Translate the user's text into {target_name}. "
            "Output ONLY the translation — no quotes, no notes, no original text.")
     return _brain_text(sys, text, cfg, timeout=30).strip()
+
+
+def translate_stream(text: str, target_name: str, cfg: Optional["BrainConfig"] = None):
+    """번역을 토큰 단위로 스트리밍(인터뷰 모드). ollama/openai는 진짜 델타, codex는 통짜 1청크."""
+    text = (text or "").strip()
+    if not text:
+        return
+    cfg = cfg or BrainConfig()
+    sys = (f"Translate the user's text into {target_name}. "
+           "Output ONLY the translation — no quotes, no notes, no original text.")
+    yield from _brain_text_stream(sys, text, cfg, timeout=30)
 
 
 def chat_reply(utterance: str, context: str = "", cfg: Optional["BrainConfig"] = None) -> dict:
@@ -656,6 +738,14 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
             it = item.get("type")
             if etype in ("error", "turn.failed", "stream.error"):
                 error_msg = e.get("message") or (e.get("error") or {}).get("message") or "작업 실패"
+                continue
+            if etype == "turn.completed":
+                # 이 앱이 쓴 토큰을 누적(사용량 대시보드용). 실패해도 무시.
+                try:
+                    from ghost_local import usage
+                    usage.record_codex(cfg.codex_model, e.get("usage") or {})
+                except Exception:  # noqa: BLE001
+                    pass
                 continue
             if etype not in ("item.started", "item.completed"):
                 continue

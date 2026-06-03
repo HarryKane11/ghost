@@ -50,9 +50,10 @@ export function useListening() {
   const onUttRef = useRef<((b: Blob) => void) | null>(null);
   const onInterimRef = useRef<((b: Blob) => void) | null>(null);
   const interimMsRef = useRef(0);
-  // 네이티브 토큰-스트리밍(parakeet ws). 있으면 interim-blob 대신 ws 부분결과를 쓴다.
+  // 네이티브 토큰-스트리밍(parakeet ws / ElevenLabs realtime ws). interim-blob 대신 ws 부분결과.
   const wsRef = useRef<WebSocket | null>(null);
-  const onPartialRef = useRef<((text: string) => void) | null>(null);
+  const onPartialRef = useRef<((text: string) => void) | null>(null);     // 부분(초안)
+  const onCommittedRef = useRef<((text: string) => void) | null>(null);   // 확정(최종 라인) — 있으면 ws final이 주도
   const streamUrlRef = useRef<string | null>(null);
 
   // 링버퍼
@@ -196,7 +197,11 @@ export function useListening() {
           try {
             const d = JSON.parse(e.data);
             if (d.error) { ws.close(); wsRef.current = null; return; }  // 미지원 → 폴백
-            if (typeof d.text === "string") onPartialRef.current?.(d.text);
+            if (typeof d.text !== "string") return;
+            // final + onCommitted 핸들러가 있으면(ElevenLabs realtime) 확정 라인으로 처리.
+            // 없으면(parakeet) final이든 아니든 전부 라이브 초안으로.
+            if (d.final && onCommittedRef.current) onCommittedRef.current(d.text);
+            else onPartialRef.current?.(d.text);
           } catch { /* ignore */ }
         };
         ws.onclose = () => { if (wsRef.current === ws) wsRef.current = null; };
@@ -218,12 +223,14 @@ export function useListening() {
   }, [onAudio]);
 
   const start = useCallback(
-    async (onUtterance: (b: Blob) => void, onInterim: ((b: Blob) => void) | null, source: Source = "mic", deviceId?: string,
-           streamUrl?: string | null, onPartial?: ((text: string) => void) | null) => {
+    async (onUtterance: ((b: Blob) => void) | null, onInterim: ((b: Blob) => void) | null, source: Source = "mic", deviceId?: string,
+           streamUrl?: string | null, onPartial?: ((text: string) => void) | null,
+           onCommitted?: ((text: string) => void) | null) => {
       onUttRef.current = onUtterance;
       onInterimRef.current = onInterim;   // null이면 초안(interim) 비활성
       streamUrlRef.current = streamUrl || null;   // 있으면 네이티브 ws 스트리밍
       onPartialRef.current = onPartial || null;
+      onCommittedRef.current = onCommitted || null;   // 있으면 ws final이 확정 라인을 주도(realtime)
       inSpeechRef.current = false;
       startFramesRef.current = 0;
       silenceMsRef.current = 0;

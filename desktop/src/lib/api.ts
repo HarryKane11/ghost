@@ -271,6 +271,52 @@ export async function translateText(text: string, target: string): Promise<strin
   try { return (await (await fetch(`${BASE}/api/translate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, target }) })).json()).text || ""; } catch { return ""; }
 }
 
+/** 번역 토큰 스트리밍(인터뷰 모드). delta 이벤트로 토큰을 받고 done에서 종료. 반환값은 중단 함수. */
+export function streamTranslate(
+  text: string,
+  target: string,
+  h: { onDelta?: (d: string) => void; onDone?: () => void; onError?: (e: string) => void },
+): () => void {
+  const ctrl = new AbortController();
+  let finished = false;
+  const finish = () => { if (!finished) { finished = true; h.onDone?.(); } };
+  (async () => {
+    const r = await fetch(`${BASE}/api/translate/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, target }),
+      signal: ctrl.signal,
+    });
+    if (!r.ok || !r.body) throw new Error("translate stream failed");
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i: number;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        let ev = "message", data = "";
+        for (const line of chunk.split("\n")) {
+          if (line.startsWith("event:")) ev = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+        if (!data) continue;
+        let payload: { text?: string; error?: string };
+        try { payload = JSON.parse(data); } catch { continue; }
+        if (ev === "delta") h.onDelta?.(payload.text || "");
+        else if (ev === "done") finish();
+        else if (ev === "error") h.onError?.(payload.error || "error");
+      }
+    }
+    finish();
+  })().catch((e) => { if (!ctrl.signal.aborted) h.onError?.(String(e)); finish(); });
+  return () => ctrl.abort();
+}
+
 // 전역 용어집 (Word Memory)
 export type GlossaryItem = { term: string; note?: string };
 export async function getGlossary(): Promise<GlossaryItem[]> {
@@ -282,8 +328,15 @@ export async function setGlossary(items: GlossaryItem[]): Promise<GlossaryItem[]
 
 export type SttModelOption = { id: string; label: string; lang?: string; approx_gb?: number; engine?: string; streaming?: boolean; diarization?: boolean; engine_ready?: boolean; install?: string };
 export type SttModels = { local: SttModelOption[]; local_active: string; cloud: SttModelOption[]; cloud_active: string };
-export function sttWsUrl(): string { return BASE.replace(/^http/, "ws") + "/ws/stt"; }
-export async function getSttStreaming(): Promise<{ available: boolean; model?: string }> {
+export type StreamKind = "elevenlabs" | "parakeet" | null;
+export function sttWsUrl(meetingId = "", source = "mic"): string {
+  const qs = new URLSearchParams();
+  if (meetingId) qs.set("meeting_id", meetingId);
+  if (source) qs.set("source", source);
+  const q = qs.toString();
+  return BASE.replace(/^http/, "ws") + "/ws/stt" + (q ? `?${q}` : "");
+}
+export async function getSttStreaming(): Promise<{ available: boolean; kind?: StreamKind; model?: string }> {
   try { return await (await fetch(`${BASE}/api/stt/streaming`)).json(); } catch { return { available: false }; }
 }
 export async function getSttModels(): Promise<SttModels | null> {
@@ -307,14 +360,44 @@ export function streamMinutesFor(transcript: string, h: StreamHandlers) {
   return streamSSE("/api/minutes/stream", { transcript }, h);
 }
 
-export async function transcribe(blob: Blob, meetingId = "", source = "mic"): Promise<string> {
+export type TranscribeResult = { text: string; provider?: string; model?: string; engine?: string; fallback?: boolean };
+// ── 사용량 대시보드 ──────────────────────────────────────────────────────────
+export type Usage = {
+  codex: {
+    requests: number; input_tokens: number; cached_input_tokens: number;
+    output_tokens: number; reasoning_tokens: number; cost_usd: number;
+    by_model: Record<string, { requests: number; input_tokens: number; output_tokens: number; cost_usd: number }>;
+    budget_usd: number; budget_pct: number | null;
+  };
+  elevenlabs_stt: { requests: number; seconds: number; cost_usd: number };
+  local_models: { id: string; label: string; present: boolean; size_bytes: number; approx_gb?: number }[];
+  local_total_bytes: number;
+  rates: { eleven_stt_usd_per_hour: number };
+};
+export async function getUsage(): Promise<Usage | null> {
+  try {
+    const r = await fetch(`${BASE}/api/usage`);
+    if (!r.ok) return null;            // 구버전 백엔드(엔드포인트 없음) → 무시
+    const j = await r.json();
+    return j && j.codex ? j : null;    // 형태 검증(404 JSON 등 방어)
+  } catch { return null; }
+}
+export async function setUsageBudget(usd: number): Promise<Usage | null> {
+  try { return await (await fetch(`${BASE}/api/usage/budget`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ usd }) })).json(); } catch { return null; }
+}
+export async function resetUsage(): Promise<Usage | null> {
+  try { return await (await fetch(`${BASE}/api/usage/reset`, { method: "POST" })).json(); } catch { return null; }
+}
+
+export async function transcribe(blob: Blob, meetingId = "", source = "mic"): Promise<TranscribeResult> {
   const fd = new FormData();
   fd.append("audio", blob, blob.type.includes("wav") ? "audio.wav" : "audio.webm");
   if (meetingId) fd.append("meeting_id", meetingId);
   fd.append("source", source);
   const r = await fetch(`${BASE}/api/transcribe`, { method: "POST", body: fd });
   if (!r.ok) throw new Error("transcribe failed");
-  return ((await r.json()).text || "").trim();
+  const j = await r.json();
+  return { ...j, text: (j.text || "").trim() };
 }
 
 export async function ttsUrl(text: string): Promise<string> {

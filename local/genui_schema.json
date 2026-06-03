@@ -18,7 +18,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["heading", "text", "stat", "list", "steps", "link", "quote", "handwritten", "image", "chart", "table", "callout", "badges", "progress", "keyvalue", "timeline", "divider"]
+            "enum": ["heading", "text", "stat", "list", "steps", "link", "quote", "handwritten", "image", "chart", "table", "callout", "badges", "progress", "keyvalue", "timeline", "divider", "accordion", "tabs", "checklist", "actions", "code"]
           },
           "text": { "type": "string" },
           "label": { "type": "string" },
