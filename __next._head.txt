@@ -1,0 +1,6 @@
+1:"$Sreact.fragment"
+2:I[76779,["/ghost/_next/static/chunks/0tov0bmn45nkq.js","/ghost/_next/static/chunks/0jdah9p5of~i~.js"],"ViewportBoundary"]
+3:I[76779,["/ghost/_next/static/chunks/0tov0bmn45nkq.js","/ghost/_next/static/chunks/0jdah9p5of~i~.js"],"MetadataBoundary"]
+4:"$Sreact.suspense"
+5:I[6726,["/ghost/_next/static/chunks/0tov0bmn45nkq.js","/ghost/_next/static/chunks/0jdah9p5of~i~.js"],"IconMark"]
+0:{"rsc":["$","$1","h",{"children":[null,["$","$L2",null,{"children":[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}]]}],["$","div",null,{"hidden":true,"children":["$","$L3",null,{"children":["$","$4",null,{"name":"Next.Metadata","children":[["$","title","0",{"children":"Ghost — keep the meeting moving · 회의가 멈추지 않게"}],["$","meta","1",{"name":"description","content":"A proactive in-meeting AI that quietly listens and surfaces what you need as cards. 회의 중 AI가 조용히 듣다가, 필요한 정보를 찾아 카드로 띄웁니다."}],["$","link","2",{"rel":"icon","href":"/ghost/favicon.ico?favicon.0x3dzn~oxb6tn.ico","sizes":"256x256","type":"image/x-icon"}],["$","$L5","3",{}]]}]}]}],["$","meta",null,{"name":"next-size-adjust","content":""}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"qhvrSNCL8m8JgrOL8kfDv"}
