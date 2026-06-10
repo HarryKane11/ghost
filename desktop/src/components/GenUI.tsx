@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useT } from "@/lib/i18n";
 import {
   Link2, Quote, ArrowUpRight, Info, TriangleAlert, CircleCheck, CircleX,
   ChevronDown, ArrowRight,
@@ -13,6 +14,7 @@ const TS_RE = /(\[\d{1,2}:\d{2}(?::\d{2})?\])/g;
 /** 문자열 안의 [mm:ss]/[hh:mm:ss]를 재생 버튼으로 렌더(onSeek 있을 때). 없으면 평문. */
 function TsText({ children }: { children?: string }) {
   const onSeek = useContext(SeekCtx);
+  const { t } = useT();
   const s = children ?? "";
   if (!onSeek || !s || !/\[\d{1,2}:\d{2}/.test(s)) return <>{s}</>;
   return (
@@ -22,7 +24,7 @@ function TsText({ children }: { children?: string }) {
         if (!m) return <span key={i}>{p}</span>;
         const sec = m[3] ? +m[1] * 3600 + +m[2] * 60 + +m[3] : +m[1] * 60 + +m[2];
         return (
-          <button key={i} onClick={() => onSeek(sec)} title="이 구간 재생"
+          <button key={i} onClick={() => onSeek(sec)} title={t("genui.seek")}
             className="mx-0.5 inline-flex items-center gap-0.5 rounded-md border border-spark-soft bg-[color-mix(in_srgb,var(--spark)_10%,transparent)] px-1.5 py-px align-middle text-[11px] font-medium text-spark-deep transition-colors hover:bg-[color-mix(in_srgb,var(--spark)_20%,transparent)]">
             ▶ {p.slice(1, -1)}
           </button>
@@ -35,10 +37,11 @@ function TsText({ children }: { children?: string }) {
 /** 깨진/없는 이미지 URL이면 조용히 숨긴다 (회의록 외 image 블록 깨짐 방지) */
 function ImageBlock({ url, label }: { url?: string; label?: string }) {
   const [bad, setBad] = useState(false);
+  const { t } = useT();
   if (!url || bad || !/^(data:image|https?:)/.test(url)) return null;
   return (
     <figure className="overflow-hidden rounded-xl border border-hairline bg-surface-soft">
-      <img src={url} alt={label || "Ghost가 생성한 이미지"} className="block w-full" loading="lazy" onError={() => setBad(true)} />
+      <img src={url} alt={label || t("genui.imageAlt")} className="block w-full" loading="lazy" onError={() => setBad(true)} />
       {label && <figcaption className="px-3 py-1.5 text-[11px] text-stone">{label}</figcaption>}
     </figure>
   );

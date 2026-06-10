@@ -5,7 +5,8 @@ import * as api from "@/lib/api";
 const fmtNum = (n: number) => n.toLocaleString();
 const fmtUsd = (n: number) => `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`;
 const fmtGb = (b: number) => (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(0)} MB`);
-const fmtDur = (s: number) => (s >= 3600 ? `${(s / 3600).toFixed(1)}시간` : s >= 60 ? `${(s / 60).toFixed(1)}분` : `${Math.round(s)}초`);
+const fmtDur = (s: number, t: (k: string) => string) =>
+  (s >= 3600 ? `${(s / 3600).toFixed(1)}${t("usage.hUnit")}` : s >= 60 ? `${(s / 60).toFixed(1)}${t("usage.mUnit")}` : `${Math.round(s)}${t("usage.sUnit")}`);
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -59,7 +60,7 @@ export function UsageDashboard({ t }: { t: (k: string) => string }) {
           <Stat label={t("usage.estCost")} value={fmtUsd(c.cost_usd)} />
           <Stat label={t("usage.cached")} value={fmtNum(c.cached_input_tokens)} />
           <Stat label={t("usage.requests")} value={fmtNum(c.requests)} />
-          <Stat label="모델" value={String(Object.keys(c.by_model).length || 0)} />
+          <Stat label={t("usage.models")} value={String(Object.keys(c.by_model).length || 0)} />
         </div>
         {/* 예산 대비 차지율 */}
         <div className="mt-2.5">
@@ -85,7 +86,7 @@ export function UsageDashboard({ t }: { t: (k: string) => string }) {
       <div className="mb-3 rounded-lg border border-hairline p-3">
         <div className="mb-2 flex items-center gap-1.5 text-[12px] font-medium text-steel"><Cloud className="size-3.5" /> {t("usage.elevenTitle")}</div>
         <div className="grid grid-cols-3 gap-2">
-          <Stat label={t("usage.audioTime")} value={fmtDur(u.elevenlabs_stt.seconds)} />
+          <Stat label={t("usage.audioTime")} value={fmtDur(u.elevenlabs_stt.seconds, t)} />
           <Stat label={t("usage.requests")} value={fmtNum(u.elevenlabs_stt.requests)} />
           <Stat label={t("usage.estCost")} value={fmtUsd(u.elevenlabs_stt.cost_usd)} />
         </div>

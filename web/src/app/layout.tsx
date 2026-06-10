@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { I18nProvider } from "@/lib/i18n";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -15,9 +16,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ghost — 회의가 멈추지 않게",
+  title: "Ghost — keep the meeting moving · 회의가 멈추지 않게",
   description:
-    "회의 중 AI가 조용히 듣다가, 필요한 정보를 찾아 카드로 띄웁니다. 부를 때만 말합니다.",
+    "A proactive in-meeting AI that quietly listens and surfaces what you need as cards. 회의 중 AI가 조용히 듣다가, 필요한 정보를 찾아 카드로 띄웁니다.",
 };
 
 export default function RootLayout({
@@ -25,7 +26,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ko" className={`${inter.variable} ${geistMono.variable}`}>
-      <body className="min-h-screen antialiased">{children}</body>
+      <body className="min-h-screen antialiased">
+        <I18nProvider>{children}</I18nProvider>
+      </body>
     </html>
   );
 }

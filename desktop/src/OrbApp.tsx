@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { GhostLogo } from "@/components/GhostLogo";
+import { makeT, detectLang, type Lang } from "@/lib/i18n";
 
 type Bubble = { id: number; text: string };
 
@@ -12,6 +13,11 @@ type Bubble = { id: number; text: string };
  */
 export default function OrbApp() {
   const g = (typeof window !== "undefined" ? (window as any).ghost : null) || {};
+  // 메인 앱과 같은 언어 설정(localStorage 공유) — 없으면 시스템 언어.
+  const t = makeT(((): Lang => {
+    try { return (JSON.parse(localStorage.getItem("ghost.lang") || "null") as Lang) || detectLang(); }
+    catch { return detectLang(); }
+  })());
   const [bubble, setBubble] = useState<Bubble | null>(null);
   const [active, setActive] = useState(false);
 
@@ -41,7 +47,7 @@ export default function OrbApp() {
           {bubble.text}
         </button>
       )}
-      <button onClick={() => g.showMain?.()} title="Ghost 열기"
+      <button onClick={() => g.showMain?.()} title={t("orb.open")}
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         className="relative grid size-14 shrink-0 place-items-center rounded-full bg-ink shadow-2xl transition-transform hover:scale-105">
         <GhostLogo variant="icon" size={42} className="rounded-full" />

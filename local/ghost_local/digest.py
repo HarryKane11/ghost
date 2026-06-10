@@ -15,25 +15,45 @@ from ghost_local import brain, memory, store
 from ghost_local.adapters import caps_for
 
 
-def _summary_card(summary: Dict[str, Any], when_label: str) -> Dict[str, Any]:
+# 카드 라벨 3개 국어(코드가 결정적으로 만드는 부분 — LLM 출력은 _lang_line이 맡는다).
+_L = {
+    "summary":    {"ko": "요약", "en": "Summary", "zh": "摘要"},
+    "decisions":  {"ko": "결정", "en": "Decisions", "zh": "决定"},
+    "actions":    {"ko": "액션 아이템", "en": "Action items", "zh": "行动项"},
+    "open":       {"ko": "미해결", "en": "Open questions", "zh": "未决问题"},
+    "not_enough": {"ko": "아직 정리할 내용이 충분하지 않아요.", "en": "Not enough to summarize yet.", "zh": "目前还没有足够的内容可总结。"},
+    "title":      {"ko": "회의 다이제스트", "en": "Meeting digest", "zh": "会议摘要"},
+    "so_far":     {"ko": "지금까지", "en": "so far", "zh": "至今"},
+    "folding":    {"ko": "회의 흐름 정리 중…", "en": "Catching up on the meeting…", "zh": "正在梳理会议进展…"},
+    "researching": {"ko": "미해결 조사: {q}", "en": "Researching open question: {q}", "zh": "正在调查未决问题：{q}"},
+    "not_found":  {"ko": "회의를 찾을 수 없어요.", "en": "Meeting not found.", "zh": "找不到该会议。"},
+}
+
+
+def _t(key: str, cfg: "brain.BrainConfig", **fmt) -> str:
+    s = _L[key].get(cfg.lang) or _L[key]["ko"]
+    return s.format(**fmt) if fmt else s
+
+
+def _summary_card(summary: Dict[str, Any], when_label: str, cfg: "brain.BrainConfig") -> Dict[str, Any]:
     """구조화 요약 → GenUI 카드 spec(LLM 없이 결정적으로 구성)."""
     blocks: List[Dict[str, Any]] = []
     if summary.get("summary"):
-        blocks.append({"type": "heading", "text": "요약"})
+        blocks.append({"type": "heading", "text": _t("summary", cfg)})
         blocks.append({"type": "text", "text": summary["summary"]})
     if summary.get("decisions"):
-        blocks.append({"type": "heading", "text": "결정"})
+        blocks.append({"type": "heading", "text": _t("decisions", cfg)})
         blocks.append({"type": "list", "items": list(summary["decisions"])})
     if summary.get("action_items"):
-        blocks.append({"type": "heading", "text": "액션 아이템"})
+        blocks.append({"type": "heading", "text": _t("actions", cfg)})
         blocks.append({"type": "list", "items": list(summary["action_items"])})
     if summary.get("open_questions"):
-        blocks.append({"type": "heading", "text": "미해결"})
+        blocks.append({"type": "heading", "text": _t("open", cfg)})
         blocks.append({"type": "list", "items": list(summary["open_questions"])})
     if not blocks:
-        blocks = [{"type": "text", "text": "아직 정리할 내용이 충분하지 않아요."}]
+        blocks = [{"type": "text", "text": _t("not_enough", cfg)}]
     return {
-        "title": f"회의 다이제스트 · {when_label}",
+        "title": f"{_t('title', cfg)} · {when_label}",
         "spoken": "",  # 무음 (회의 방해 금지)
         "intent": "note",
         "blocks": blocks,
@@ -57,14 +77,14 @@ def digest_stream(
     """다이제스트 생성 스트림. yield ("progress", {...}) / ("result", spec)."""
     cfg = cfg or brain.BrainConfig()
     if store.get_meta(meeting_id) is None:
-        yield ("result", {"title": "회의 다이제스트", "spoken": "", "intent": "none",
-                          "blocks": [{"type": "text", "text": "회의를 찾을 수 없어요."}]})
+        yield ("result", {"title": _t("title", cfg), "spoken": "", "intent": "none",
+                          "blocks": [{"type": "text", "text": _t("not_found", cfg)}]})
         return
 
     # 1) 최신 상태로 fold(force) → 구조화 요약.
-    yield ("progress", {"text": "회의 흐름 정리 중…"})
+    yield ("progress", {"text": _t("folding", cfg)})
     summary = memory.fold(meeting_id, cfg, force=True)
-    card = _summary_card(summary, when_label or "지금까지")
+    card = _summary_card(summary, when_label or _t("so_far", cfg), cfg)
 
     # 1.5) 요약 카드를 '먼저' 보낸다 → 클라이언트 타임아웃 해제(조사가 느려도 카드는 떴음).
     yield ("result", card)
@@ -79,7 +99,7 @@ def digest_stream(
         return
 
     # 2) 가장 중요한 미해결 1건만 실제 조사(R1: 1건 한정). best-effort — 실패/지연돼도 요약은 이미 떴다.
-    yield ("progress", {"text": f"미해결 조사: {question[:48]}"})
+    yield ("progress", {"text": _t("researching", cfg, q=question[:48])})
     research_blocks: List[Dict[str, Any]] = []
     ctx = memory.build_context(meeting_id)
     query = f"회의 중 아직 답이 안 나온 다음 질문을 조사해서 근거와 함께 간결히 정리해줘: {question}"

@@ -1,3 +1,5 @@
+"use client";
+
 import {
   Sparkles,
   Globe,
@@ -10,74 +12,70 @@ import {
   Star,
   Download,
   SquareTerminal,
+  Languages,
+  Check,
 } from "lucide-react";
+import * as React from "react";
 import { GhostLogo } from "@/components/ghost-logo";
 import { MeetingDemo } from "@/components/meeting-demo";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-
+import { useI18n, LANGS } from "@/lib/i18n";
 
 const GITHUB_URL = "https://github.com/HarryKane11/ghost";
 
-const FEATURES = [
-  {
-    icon: Sparkles,
-    title: "실시간 카드",
-    body: "질문이나 정보 공백을 감지하면, 회의를 끊지 않고 옆에 조용히 카드를 띄웁니다.",
-  },
-  {
-    icon: FileText,
-    title: "사내 지식",
-    body: "Notion·드라이브의 과거 결정과 회의록을 찾아 '저번에 어떻게 했더라'에 답합니다.",
-  },
-  {
-    icon: Globe,
-    title: "웹 검색",
-    body: "최신 통계·시장·경쟁사 정보를 출처와 함께. 회의 속도에 맞춰 3초 안에.",
-  },
-  {
-    icon: Volume2,
-    title: "부를 때만 음성",
-    body: '평소엔 무음. "재키"라고 부를 때만 또렷한 한국어 음성으로 답합니다.',
-  },
-  {
-    icon: ListChecks,
-    title: "회의 후 정리",
-    body: "끝나면 화자별 액션아이템과 결정사항을 추출해 자동으로 기록합니다.",
-  },
-  {
-    icon: Shield,
-    title: "온프레미스 보안",
-    body: "음성이 외부로 나가면 안 되는 팀을 위해, 사내 서버 전용 모드를 제공합니다.",
-  },
-];
-
-const STEPS = [
-  { n: "01", title: "조용히 듣습니다", body: "데스크탑 앱이 회의 오디오를 듣고 맥락을 이해합니다." },
-  { n: "02", title: "필요한 걸 찾습니다", body: "정보 공백을 감지해 웹·사내 지식에서 근거를 검색합니다." },
-  { n: "03", title: "카드로 띄웁니다", body: "출처와 신뢰도를 붙여, 흐름을 끊지 않고 보여줍니다." },
-];
-
-const OSS_POINTS = [
-  {
-    icon: Download,
-    title: "무료로 받아서 바로",
-    body: "계정도, 구독도, 신용카드도 없습니다. 받아서 당신의 키만 연결하면 끝.",
-  },
-  {
-    icon: Shield,
-    title: "로컬에서 동작",
-    body: "전사는 온디바이스(Qwen3-ASR)에서. 오디오는 당신의 컴퓨터를 벗어나지 않습니다.",
-  },
-  {
-    icon: SquareTerminal,
-    title: "코드가 공개돼 있어요",
-    body: "무엇을 보내고 무엇을 저장하는지 직접 감사하세요. MIT 라이선스, 자유롭게 포크.",
-  },
-];
+/** 상단 지구본 — 사이트 언어 전환 (한국어/English/中文, localStorage 기억) */
+function LangToggle() {
+  const { lang, setLang, t } = useI18n();
+  const [open, setOpen] = React.useState(false);
+  void t;
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((v) => !v)} aria-label="Language"
+        className={buttonVariants({ variant: "ghost", size: "sm" })}>
+        <Languages className="size-4" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-10 z-50 min-w-[130px] rounded-xl border border-hairline bg-background p-1 shadow-lg">
+            {LANGS.map((l) => (
+              <button key={l.id} onClick={() => { setLang(l.id); setOpen(false); }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-steel transition-colors hover:bg-surface-soft hover:text-foreground">
+                {l.label}
+                {lang === l.id && <Check className="ml-auto size-3.5 text-spark-deep" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function Home() {
+  const { t } = useI18n();
+
+  const FEATURES = [
+    { icon: Sparkles, title: t("feat.f1t"), body: t("feat.f1b") },
+    { icon: FileText, title: t("feat.f2t"), body: t("feat.f2b") },
+    { icon: Globe, title: t("feat.f3t"), body: t("feat.f3b") },
+    { icon: Volume2, title: t("feat.f4t"), body: t("feat.f4b") },
+    { icon: ListChecks, title: t("feat.f5t"), body: t("feat.f5b") },
+    { icon: Shield, title: t("feat.f6t"), body: t("feat.f6b") },
+  ];
+  const STEPS = [
+    { n: "01", title: t("how.s1t"), body: t("how.s1b") },
+    { n: "02", title: t("how.s2t"), body: t("how.s2b") },
+    { n: "03", title: t("how.s3t"), body: t("how.s3b") },
+  ];
+  const OSS_POINTS = [
+    { icon: Download, title: t("oss.o1t"), body: t("oss.o1b") },
+    { icon: Shield, title: t("oss.o2t"), body: t("oss.o2b") },
+    { icon: SquareTerminal, title: t("oss.o3t"), body: t("oss.o3b") },
+  ];
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Nav */}
@@ -88,17 +86,18 @@ export default function Home() {
             <span className="text-[15px] font-semibold tracking-tight">Ghost</span>
           </a>
           <nav className="ml-6 hidden items-center gap-6 text-[13.5px] text-steel md:flex">
-            <a className="transition-colors hover:text-foreground" href="#features">기능</a>
-            <a className="transition-colors hover:text-foreground" href="#how">작동 방식</a>
-            <a className="transition-colors hover:text-foreground" href="#opensource">오픈소스</a>
+            <a className="transition-colors hover:text-foreground" href="#features">{t("nav.features")}</a>
+            <a className="transition-colors hover:text-foreground" href="#how">{t("nav.how")}</a>
+            <a className="transition-colors hover:text-foreground" href="#opensource">{t("nav.oss")}</a>
           </nav>
           <div className="ml-auto flex items-center gap-2">
+            <LangToggle />
             <ThemeToggle />
             <a href={GITHUB_URL} className={buttonVariants({ variant: "ghost", size: "sm" })}>
               <Code className="size-4" />
               GitHub
             </a>
-            <a href={GITHUB_URL + "/releases"} className={buttonVariants({ size: "sm" })}>다운로드</a>
+            <a href={GITHUB_URL + "/releases"} className={buttonVariants({ size: "sm" })}>{t("nav.download")}</a>
           </div>
         </div>
       </header>
@@ -109,29 +108,28 @@ export default function Home() {
         <div className="relative mx-auto max-w-6xl px-6 pt-20 pb-10 text-center">
           <Badge variant="outline" size="md" className="mx-auto">
             <Sparkles className="size-3 text-spark-deep" />
-            회의 중 능동 어시스턴트
+            {t("hero.badge")}
           </Badge>
           <h1 className="mx-auto mt-6 max-w-3xl text-[44px] font-semibold leading-[1.05] tracking-[-0.03em] sm:text-6xl">
-            회의가 멈추지 않게.
+            {t("hero.title1")}
             <br />
-            <span className="text-stone">곁에서 조용히 찾아주는 AI.</span>
+            <span className="text-stone">{t("hero.title2")}</span>
           </h1>
           <p className="mx-auto mt-6 max-w-xl text-[16px] leading-relaxed text-steel">
-            Ghost는 회의를 듣다가 필요한 정보를 웹과 사내 지식에서 찾아 카드로 띄웁니다.
-            흐름은 끊지 않고, 부를 때만 말합니다.
+            {t("hero.sub")}
           </p>
           <div className="mt-8 flex items-center justify-center gap-3">
             <a href={GITHUB_URL + "/releases"} className={buttonVariants({ size: "lg" })}>
               <Download className="size-4" />
-              macOS 다운로드
+              {t("hero.ctaMac")}
             </a>
             <a href={GITHUB_URL} className={buttonVariants({ variant: "secondary", size: "lg" })}>
               <Code className="size-4" />
-              GitHub에서 보기
+              {t("hero.ctaGit")}
             </a>
           </div>
           <p className="mt-4 text-[12.5px] text-stone">
-            무료 · 오픈소스(MIT) · 로컬 실행 · 신용카드 불필요
+            {t("hero.fineprint")}
           </p>
         </div>
 
@@ -148,10 +146,10 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6 py-20">
           <div className="max-w-2xl">
             <h2 className="text-[32px] font-semibold tracking-[-0.02em] sm:text-4xl">
-              똑똑하게, 그러나 방해하지 않게.
+              {t("feat.title")}
             </h2>
             <p className="mt-4 text-[16px] leading-relaxed text-steel">
-              알림 피로 없이. Ghost는 확실할 때만 나서고, 애매하면 물러섭니다.
+              {t("feat.sub")}
             </p>
           </div>
           <div className="mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-hairline bg-hairline sm:grid-cols-2 lg:grid-cols-3">
@@ -173,14 +171,14 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6 py-20">
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
             <div>
-              <Badge variant="soft" size="md">작동 방식</Badge>
+              <Badge variant="soft" size="md">{t("how.badge")}</Badge>
               <h2 className="mt-5 text-[32px] font-semibold leading-tight tracking-[-0.02em] sm:text-4xl">
-                듣고, 찾고,
+                {t("how.title1")}
                 <br />
-                띄웁니다.
+                {t("how.title2")}
               </h2>
               <p className="mt-4 max-w-md text-[16px] leading-relaxed text-steel">
-                세 단계. 설정도, 명령도 필요 없습니다. 회의를 시작하면 Ghost가 알아서 합니다.
+                {t("how.sub")}
               </p>
             </div>
             <div className="space-y-3">
@@ -207,14 +205,13 @@ export default function Home() {
           <div className="text-center">
             <Badge variant="soft" size="md" className="mx-auto">
               <Code className="size-3" />
-              오픈소스
+              {t("oss.badge")}
             </Badge>
             <h2 className="mt-5 text-[32px] font-semibold tracking-[-0.02em] sm:text-4xl">
-              무료이고, 열려 있습니다.
+              {t("oss.title")}
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-[16px] leading-relaxed text-steel">
-              Ghost는 가격표가 없습니다. 받아서, 당신의 AI 키를 연결하고, 그대로 쓰세요.
-              필요하면 코드를 고쳐 당신의 팀에 맞추세요.
+              {t("oss.sub")}
             </p>
           </div>
           <div className="mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-hairline bg-hairline sm:grid-cols-3">
@@ -231,11 +228,11 @@ export default function Home() {
           <div className="mt-8 flex items-center justify-center gap-3">
             <a href={GITHUB_URL + "/releases"} className={buttonVariants({ size: "lg" })}>
               <Download className="size-4" />
-              다운로드
+              {t("nav.download")}
             </a>
             <a href={GITHUB_URL} className={buttonVariants({ variant: "secondary", size: "lg" })}>
               <Star className="size-4" />
-              소스 보기 · 별표
+              {t("oss.ctaStar")}
             </a>
           </div>
         </div>
@@ -246,12 +243,12 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6 py-24 text-center">
           <GhostLogo variant="icon" size={56} className="mx-auto rounded-2xl" />
           <h2 className="mx-auto mt-7 max-w-xl text-[32px] font-semibold leading-tight tracking-[-0.02em] sm:text-[40px]">
-            다음 회의부터, 곁에 두세요.
+            {t("cta.title")}
           </h2>
           <div className="mt-8 flex items-center justify-center gap-3">
             <a href={GITHUB_URL + "/releases"} className={buttonVariants({ size: "lg" })}>
               <Download className="size-4" />
-              macOS 다운로드
+              {t("hero.ctaMac")}
               <ArrowRight className="size-4" />
             </a>
             <a href={GITHUB_URL} className={buttonVariants({ variant: "secondary", size: "lg" })}>
@@ -273,7 +270,7 @@ export default function Home() {
             <a href={GITHUB_URL} className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground">
               <Code className="size-3.5" /> GitHub
             </a>
-            <a href={GITHUB_URL + "/blob/main/LICENSE"} className="transition-colors hover:text-foreground">MIT 라이선스</a>
+            <a href={GITHUB_URL + "/blob/main/LICENSE"} className="transition-colors hover:text-foreground">{t("footer.license")}</a>
             <span>© 2026 Ghost</span>
           </div>
         </div>
