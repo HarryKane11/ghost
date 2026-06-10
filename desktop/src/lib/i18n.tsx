@@ -159,6 +159,8 @@ const DICT: Record<string, Record<Lang, string>> = {
   "doctor.mic": { ko: "마이크 권한", en: "Mic permission", zh: "麦克风权限" },
   "doctor.micDenied": { ko: "거부됨 — 시스템 설정에서 허용 필요", en: "Denied — allow in System Settings", zh: "已拒绝 — 请在系统设置中允许" },
   "doctor.micUnknown": { ko: "첫 청취 시작 시 요청돼요", en: "Will be requested on first listen", zh: "首次聆听时会请求" },
+  "audio.speaker": { ko: "화자", en: "Speaker ", zh: "说话人" },
+  "update.banner": { ko: "새 버전 {v} 사용 가능 — 다운로드", en: "New version {v} available — download", zh: "新版本 {v} 可用 — 下载" },
   "trans.folder": { ko: "폴더", en: "Folder", zh: "文件夹" },
   // Ask 패널 추천 프롬프트
   "ask.summary": { ko: "주요 내용 요약", en: "Summarize key points", zh: "总结要点" },

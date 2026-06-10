@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -64,6 +65,67 @@ def _load_dotenv() -> None:
             pass
 
 
+# ── 시크릿 저장 — macOS는 Keychain(암호화), 그 외/실패 시 .env(0600) 폴백 ──────
+_KEYCHAIN_SERVICE = "ghost-app"
+
+
+def _keychain_set(key: str, value: str) -> bool:
+    if sys.platform != "darwin":
+        return False
+    try:
+        r = subprocess.run(
+            ["security", "add-generic-password", "-U", "-s", _KEYCHAIN_SERVICE, "-a", key, "-w", value],
+            capture_output=True, timeout=10,
+        )
+        return r.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _keychain_get(key: str) -> str:
+    if sys.platform != "darwin":
+        return ""
+    try:
+        r = subprocess.run(
+            ["security", "find-generic-password", "-s", _KEYCHAIN_SERVICE, "-a", key, "-w"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _scrub_env_file(key: str) -> None:
+    """키체인 저장에 성공한 키를 평문 .env에서 제거(이중 보관 방지)."""
+    p = _config_dir() / ".env"
+    try:
+        if not p.exists():
+            return
+        lines = [l for l in p.read_text(encoding="utf-8").splitlines()
+                 if not (l.strip() and not l.strip().startswith("#") and l.split("=", 1)[0].strip() == key)]
+        p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        os.chmod(p, 0o600)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _persist_secret(key: str, value: str) -> None:
+    """API 키 영속 저장 — macOS Keychain 우선(암호화), 실패 시 .env(0600)."""
+    if _keychain_set(key, value):
+        _scrub_env_file(key)   # 평문 사본 제거
+        return
+    _persist_env(key, value)
+
+
+def _load_keychain_secrets() -> None:
+    """시작 시 Keychain에 저장된 키를 환경변수로 복원(.env보다 우선하지 않게 setdefault)."""
+    for key in ("ELEVENLABS_API_KEY", "OPENAI_API_KEY"):
+        if not os.environ.get(key):
+            v = _keychain_get(key)
+            if v:
+                os.environ[key] = v
+
+
 def _persist_env(key: str, value: str) -> None:
     """키를 쓰기 가능한 .env에 영속 저장(앱 재시작 후에도 유지). 기존 키는 갱신, 나머지는 보존."""
     p = _config_dir() / ".env"
@@ -84,6 +146,7 @@ def _persist_env(key: str, value: str) -> None:
 
 
 _load_dotenv()
+_load_keychain_secrets()   # macOS Keychain에 저장된 API 키 복원(평문 .env보다 안전한 1순위 저장소)
 
 app = FastAPI(title="Ghost Local Backend")
 # CORS: 렌더러(localhost vite/내부 http 서버)만 허용. 이전의 "*"는 브라우저의 아무 사이트가
@@ -246,7 +309,7 @@ def set_eleven_key(req: ElevenKeyReq) -> dict:
     k = (req.key or "").strip()
     if k:
         os.environ["ELEVENLABS_API_KEY"] = k
-        _persist_env("ELEVENLABS_API_KEY", k)   # 재시작 후에도 유지
+        _persist_secret("ELEVENLABS_API_KEY", k)   # Keychain 우선, 재시작 후에도 유지
     return {"ok": bool(k), "set": bool(stt_cloud.elevenlabs_key())}
 
 
@@ -478,7 +541,7 @@ def set_apikey(req: ApiKeyReq) -> dict:
     k = (req.key or "").strip()
     if k:
         os.environ["OPENAI_API_KEY"] = k
-        _persist_env("OPENAI_API_KEY", k)   # 재시작 후에도 유지
+        _persist_secret("OPENAI_API_KEY", k)   # Keychain 우선, 재시작 후에도 유지
     return {"ok": bool(k), "set": bool(os.environ.get("OPENAI_API_KEY"))}
 
 
@@ -1049,7 +1112,8 @@ def audio_minutes_stream(req: AudioMinutesReq) -> StreamingResponse:
     lines = []
     for s in (req.segments or []):
         if isinstance(s, dict) and (s.get("text") or "").strip():
-            lines.append(f"[{_fmt_ts(s.get('start', 0))}] {s['text'].strip()}")
+            spk = f" [화자{s['speaker']}]" if s.get("speaker") else ""
+            lines.append(f"[{_fmt_ts(s.get('start', 0))}]{spk} {s['text'].strip()}")
     transcript = "\n".join(lines)
 
     def gen():

@@ -130,6 +130,8 @@ MINUTES_TS_SYSTEM = (
     "너는 'Ghost', 회의 비서다. 아래 전사는 각 줄이 [mm:ss] 또는 [hh:mm:ss] 타임스탬프로 시작하는 "
     "'음성 파일' 전사다. 전체를 처음부터 끝까지 읽고 흐름을 이해한 뒤, 사람이 정리한 듯 상세하고 "
     "구조적인 회의록을 작성한다. 전사가 거칠어도 의미를 파악해 매끄럽게 정제한다. 전사에 쓰인 언어로 작성.\n"
+    "줄에 [화자N] 라벨이 있으면 화자 분리가 된 전사다 — 발언·결정·액션아이템의 주체를 화자 기준으로 "
+    "구분해 정리하고, 맥락상 이름을 알 수 있으면 '화자1(김OO)'처럼 병기한다(추측 단정 금지).\n"
     "★ 가장 중요: 회의록의 각 항목(요약 문장·논의 불릿·결정·액션) 끝에 그 내용이 '근거한' 음성 구간의 "
     "타임스탬프를 반드시 [mm:ss] 형식으로 붙인다. 예: '가격 정책을 월 3.9만원으로 확정 [12:34]'. "
     "여러 구간을 참고했으면 가장 핵심 구간 1개만. 타임스탬프는 전사에 실제로 나온 시각만 쓴다(지어내지 말 것).\n"
@@ -329,7 +331,15 @@ def _ollama_text(system: str, user: str, model: str = JUDGE_MODEL, timeout: int 
 
 # ── codex / openai 경량 호출 (라우팅·대화용) ────────────────────────────────
 def _codex_text(system: str, user: str, model: Optional[str] = None, timeout: int = 60) -> str:
-    """codex로 짧은 텍스트 1개 생성 (웹검색 없이 빠르게)."""
+    """codex로 짧은 텍스트 1개 생성 (웹검색 없이 빠르게).
+
+    1순위: 상시 mcp-server 세션(프로세스 스폰 비용·토큰 레이스 제거, 호출당 ~1.3s↓ 실측).
+    실패/비활성 시 기존 exec 경로로 자동 폴백.
+    """
+    from ghost_local import codex_session
+    fast = codex_session.text(f"{system}\n\n{user}", model=model or "gpt-5.4-mini", timeout=float(timeout))
+    if fast:
+        return fast
     with tempfile.NamedTemporaryFile("r", suffix=".txt", delete=False) as f:
         out_path = Path(f.name)
     cmd = ["codex", "exec", "--skip-git-repo-check",
