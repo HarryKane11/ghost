@@ -59,6 +59,7 @@ export function useListening() {
   const onPartialRef = useRef<((text: string) => void) | null>(null);     // 부분(초안)
   const onCommittedRef = useRef<((text: string) => void) | null>(null);   // 확정(최종 라인) — 있으면 ws final이 주도
   const streamUrlRef = useRef<string | null>(null);
+  const wsRetryRef = useRef(0);   // ws 재연결 시도 횟수(세션당 최대 3회)
 
   // 링버퍼
   const ringRef = useRef<Float32Array | null>(null);
@@ -88,9 +89,13 @@ export function useListening() {
 
   const finalize = useCallback(() => {
     // 네이티브 스트리밍: 엔드포인트를 디코더에 알린다(현재 가설 확정). 최종 정제는 배치가 담당.
-    if (wsRef.current?.readyState === 1) {
-      try { wsRef.current.send('{"final":true}'); } catch { /* ignore */ }
+    const wsLive = wsRef.current?.readyState === 1;
+    if (wsLive) {
+      try { wsRef.current!.send('{"final":true}'); } catch { /* ignore */ }
     }
+    // realtime ws(확정 라인을 ws가 주도)가 살아 있으면 배치 전사는 건너뛴다(이중 과금 방지).
+    // ws가 죽었으면(onUtterance는 항상 전달됨) 배치로 자동 폴백 → '스트리밍이 안 되면 전사도 멈춤' 문제 해결.
+    if (wsLive && onCommittedRef.current) return;
     const rate = rateRef.current;
     const tail = Math.floor((TAIL_MS / 1000) * rate);
     const toAbs = writtenRef.current + 0; // 종료 시점 (침묵 포함되어 tail 충분하지만 약간 더)
@@ -202,16 +207,21 @@ export function useListening() {
     ringRef.current = new Float32Array(Math.ceil(RING_SEC * ctx.sampleRate));
     writtenRef.current = 0;
 
-    // 네이티브 스트리밍 ws (parakeet). 실패해도 무시 → 2-pass 배치로 폴백.
-    if (streamUrlRef.current && onPartialRef.current) {
+    // 네이티브 스트리밍 ws (parakeet/ElevenLabs realtime).
+    // 실패·중도 끊김이면 짧은 백오프로 몇 번 재연결을 시도하고, 그래도 안 되면
+    // wsRef를 비워 둔다 → onAudio의 interim 경로·finalize의 배치 경로가 자동으로 이어받는다.
+    wsRetryRef.current = 0;
+    const connectWs = () => {
+      if (!aliveRef.current || !streamUrlRef.current || !onPartialRef.current) return;
       try {
         const ws = new WebSocket(streamUrlRef.current);
         ws.binaryType = "arraybuffer";
+        ws.onopen = () => { if (wsRef.current === ws) wsRetryRef.current = 0; };
         ws.onmessage = (e) => {
           if (!aliveRef.current) return;   // 정지 후 도착한 ws 결과 무시
           try {
             const d = JSON.parse(e.data);
-            if (d.error) { ws.close(); wsRef.current = null; return; }  // 미지원 → 폴백
+            if (d.error) { wsRetryRef.current = 99; ws.close(); wsRef.current = null; return; }  // 미지원 → 폴백(재시도 무의미)
             if (typeof d.text !== "string") return;
             // final + onCommitted 핸들러가 있으면(ElevenLabs realtime) 확정 라인으로 처리.
             // 없으면(parakeet) final이든 아니든 전부 라이브 초안으로.
@@ -219,11 +229,20 @@ export function useListening() {
             else onPartialRef.current?.(d.text);
           } catch { /* ignore */ }
         };
-        ws.onclose = () => { if (wsRef.current === ws) wsRef.current = null; };
-        ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } if (wsRef.current === ws) wsRef.current = null; };
+        const retry = () => {
+          if (wsRef.current === ws) wsRef.current = null;
+          if (!aliveRef.current) return;
+          if (wsRetryRef.current < 3) {
+            wsRetryRef.current += 1;
+            setTimeout(() => { if (aliveRef.current && !wsRef.current) connectWs(); }, 1000 * wsRetryRef.current);
+          }
+        };
+        ws.onclose = retry;
+        ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } };
         wsRef.current = ws;
       } catch { wsRef.current = null; }
-    }
+    };
+    if (streamUrlRef.current && onPartialRef.current) connectWs();
 
     const srcNode = ctx.createMediaStreamSource(stream);
     srcNodeRef.current = srcNode;

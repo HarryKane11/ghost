@@ -16,4 +16,23 @@ contextBridge.exposeInMainWorld("ghost", {
   },
   // 디스플레이 모드별 창 크기/always-on-top 조절 (full | assist | interview).
   setWindowMode: (mode) => ipcRenderer.send("ghost:window-mode", mode),
+  // ── 플로팅 고스트 오브 ──
+  // 메인 창을 숨기고 작은 오브 창으로 전환(백그라운드 전사 유지).
+  hideToOrb: () => ipcRenderer.send("ghost:hide-to-orb"),
+  // 오브에서 메인 창 복귀.
+  showMain: () => ipcRenderer.send("ghost:show-main"),
+  // 메인 → 오브: 말풍선 텍스트(카드 도착 시 자기 생각을 밝히듯).
+  orbBubble: (text) => ipcRenderer.send("ghost:orb-bubble", text),
+  onOrbBubble: (cb) => {
+    const h = (_e, text) => cb(text);
+    ipcRenderer.on("ghost:orb-bubble", h);
+    return () => ipcRenderer.removeListener("ghost:orb-bubble", h);
+  },
+  // 메인 → 오브: 청취 상태({active}) — 라이브 점 표시용.
+  orbState: (state) => ipcRenderer.send("ghost:orb-state", state),
+  onOrbState: (cb) => {
+    const h = (_e, state) => cb(state);
+    ipcRenderer.on("ghost:orb-state", h);
+    return () => ipcRenderer.removeListener("ghost:orb-state", h);
+  },
 });

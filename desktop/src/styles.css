@@ -305,3 +305,33 @@ body {
 
 .hand-ko { font-family: "Nanum Pen Script", cursive; }
 .hand-en { font-family: "Caveat", cursive; }
+
+/* ── 패널 리사이즈 드래그 중 — 텍스트 선택 방지 + iframe/임베드가 포인터를 삼키지 않게 ── */
+body.split-dragging {
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+body.split-dragging iframe {
+  pointer-events: none;
+}
+
+/* ── 실시간 다듬기로 교정된 전사 줄 — 잠깐 빛났다 가라앉는다 ── */
+.polish-glow {
+  border-radius: 6px;
+  animation: polishGlow 1.6s ease-out;
+}
+@keyframes polishGlow {
+  0% { background: color-mix(in srgb, var(--spark) 20%, transparent); }
+  100% { background: transparent; }
+}
+
+/* ── 플로팅 오브 말풍선 — 살짝 떠오르며 등장 ── */
+.orb-bubble {
+  transform-origin: bottom right;
+  animation: orbBubbleIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+@keyframes orbBubbleIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.92); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}

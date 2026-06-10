@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, shell, desktopCapturer, Tray, Menu, globalShortcut, nativeImage, ipcMain } = require("electron");
+const { app, BrowserWindow, session, shell, desktopCapturer, Tray, Menu, globalShortcut, nativeImage, ipcMain, screen } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -10,6 +10,7 @@ const TOGGLE_SHORTCUT = "CommandOrControl+Shift+G";
 let backendProc = null;
 let win = null;
 let tray = null;
+let orb = null;   // 플로팅 고스트 오브(미니 창) — 메인 창을 숨겨도 백그라운드 전사는 계속된다
 
 const IS_WIN = process.platform === "win32";
 const HOME = os.homedir();
@@ -202,6 +203,8 @@ async function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
+      // 오브 모드에서 창을 숨겨도 렌더러의 오디오 캡처·전사 루프가 멈추지 않게.
+      backgroundThrottling: false,
     },
   });
   win.once("ready-to-show", () => win.show());
@@ -239,6 +242,54 @@ async function createWindow() {
     else win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   }
 }
+
+// ── 플로팅 고스트 오브 — 작은 투명 창. 클릭하면 메인 창 복귀, 카드 도착 시 말풍선. ──
+async function createOrbWindow() {
+  if (orb) return;
+  const wa = screen.getPrimaryDisplay().workArea;
+  orb = new BrowserWindow({
+    width: 320, height: 200,
+    x: wa.x + wa.width - 332, y: wa.y + wa.height - 212,
+    frame: false, transparent: true, resizable: false, hasShadow: false,
+    alwaysOnTop: true, skipTaskbar: true, show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
+  });
+  orb.setAlwaysOnTop(true, "floating");
+  try { orb.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* ignore */ }
+  orb.on("closed", () => { orb = null; });
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devUrl) {
+    await orb.loadURL(`${devUrl}#orb`);
+  } else {
+    const base = await startRendererServer();
+    if (base) await orb.loadURL(`${base}/index.html#orb`);
+    else await orb.loadFile(path.join(__dirname, "..", "dist", "index.html"), { hash: "orb" });
+  }
+}
+
+ipcMain.on("ghost:hide-to-orb", async () => {
+  try {
+    await createOrbWindow();
+    orb?.show();
+    win?.hide();   // 숨겨도 backgroundThrottling=false라 전사는 계속
+  } catch (e) { console.error("[orb] failed:", e.message); }
+});
+ipcMain.on("ghost:show-main", () => {
+  orb?.hide();
+  showWindow();
+});
+// 메인 렌더러 → 오브로 릴레이: 말풍선(카드 spoken/title), 청취 상태(라이브 점).
+ipcMain.on("ghost:orb-bubble", (_e, text) => {
+  if (orb && orb.isVisible()) orb.webContents.send("ghost:orb-bubble", text);
+});
+ipcMain.on("ghost:orb-state", (_e, state) => {
+  orb?.webContents.send("ghost:orb-state", state);
+});
 
 // 디스플레이 모드별 창 크기/always-on-top. assist=컴팩트 플로팅, full/interview=넓게.
 ipcMain.on("ghost:window-mode", (_e, mode) => {

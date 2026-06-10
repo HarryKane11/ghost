@@ -548,6 +548,24 @@ def set_meeting_context(meeting_id: str, req: ContextReq) -> dict:
     return {"ok": meta is not None, "meeting": meta}
 
 
+class PolishReq(BaseModel):
+    text: str
+    meeting_id: str = ""
+
+
+@app.post("/api/polish")
+def polish_ep(req: PolishReq) -> dict:
+    """문장 확정 직후 실시간 다듬기 — 맥락·용어집 기반 오인식 교정 + 불명확 키워드 추출.
+
+    교정되면 저장된 전사(jsonl)도 함께 갱신된다. {text, changed, unclear[]} 반환.
+    """
+    from ghost_local import polish
+    try:
+        return polish.polish_line(req.meeting_id, req.text, _cfg())
+    except Exception:  # noqa: BLE001 — 다듬기 실패는 원문 유지(핫패스 보호)
+        return {"text": (req.text or "").strip(), "changed": False, "unclear": []}
+
+
 @app.get("/api/meetings/{meeting_id}/script")
 def get_script_ep(meeting_id: str, flush: bool = False) -> dict:
     """스크립트(문단별 정제+불릿 요약). 새 문단을 증분 처리 후 전체 반환. flush=true면 꼬리까지."""
@@ -876,7 +894,9 @@ async def transcribe(audio: UploadFile = File(...), meeting_id: str = Form(""), 
     try:
         if STATE.get("stt_provider") == "elevenlabs" and stt_cloud.elevenlabs_key():
             try:
-                text = stt_cloud.transcribe(wav, lang=STATE.get("lang"))
+                # 용어집을 Scribe keyterm prompting에 주입 → 제품명·이름 같은 희귀 고유명사 인식률↑.
+                keyterms = [g["term"] for g in store.get_glossary()]
+                text = stt_cloud.transcribe(wav, lang=STATE.get("lang"), keyterms=keyterms)
                 used = {"provider": "elevenlabs", "model": stt_cloud.active_model(), "engine": "elevenlabs"}
                 try:
                     from ghost_local import usage
@@ -1064,9 +1084,11 @@ def minutes_stream_ep(req: TranscriptReq) -> StreamingResponse:
                 if kind == "progress":
                     yield _sse("progress", payload if isinstance(payload, dict) else {"text": payload})
                 elif kind == "result":
+                    saved = False
                     if mid and store.get_meta(mid) is not None:
-                        store.save_minutes(mid, payload)  # 폴더에 영속(재시작 생존)
-                    yield _sse("result", {"spec": payload, "backend_label": label})
+                        # 폴더에 영속(재시작 생존). 빈/에러 spec은 저장 거부 → 기존 회의록 보호.
+                        saved = store.save_minutes(mid, payload)
+                    yield _sse("result", {"spec": payload, "backend_label": label, "saved": saved})
         except Exception as ex:  # noqa: BLE001
             yield _sse("error", {"error": str(ex)})
 

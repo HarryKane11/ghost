@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 import { Languages } from "lucide-react";
 
 // TODO: 실제 저장소 URL로 교체하세요.
-const GITHUB_URL = "https://github.com/ghost-app/ghost";
+const GITHUB_URL = "https://github.com/HarryKane11/ghost";
 const APP_VERSION =
   (typeof window !== "undefined" && (window as { ghost?: { version?: string } }).ghost?.version) || "0.1.0";
 
