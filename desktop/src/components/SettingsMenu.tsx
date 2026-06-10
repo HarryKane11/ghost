@@ -131,7 +131,7 @@ export function SettingsMenu({
     const r = await api.indexConnector(name);
     setIndexing(null);
     if (r.ok) setConnIndex(await api.getConnectorIndex());
-    else alert(r.message || r.error || "인덱싱 실패");
+    else alert(r.message || r.error || t("settings.indexFailMsg"));
   };
 
   useEffect(() => {
@@ -226,7 +226,7 @@ export function SettingsMenu({
   const saveStorage = async () => {
     const r = await api.setStorage(storagePath.trim());
     if (r.ok) { setStorage(await api.getStorage()); }
-    else alert(r.message || r.error || "저장 위치를 바꿀 수 없어요.");
+    else alert(r.message || r.error || t("settings.storageFailMsg"));
   };
   const downloadModel = async () => { setSttModel(await api.downloadSttModel()); };
   const gb = (n: number) => `${(n / 1e9).toFixed(1)}GB`;
@@ -285,7 +285,7 @@ export function SettingsMenu({
           <div className="flex items-center gap-2 px-2 py-3.5 text-[13px] font-semibold tracking-tight text-foreground" style={{ paddingLeft: isMac ? 84 : undefined }}>
             <button onClick={onClose} className="grid size-7 shrink-0 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground" title={t("admin.back")}><ChevronLeft className="size-4" /></button>
             {!navCollapsed && <span className="flex-1 truncate">{t("admin.title")}</span>}
-            <button onClick={() => setNavCollapsed((v) => !v)} className="grid size-7 shrink-0 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground" title={navCollapsed ? "펼치기" : "접기"}>
+            <button onClick={() => setNavCollapsed((v) => !v)} className="grid size-7 shrink-0 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground" title={navCollapsed ? t("settings.expand") : t("settings.collapse")}>
               {navCollapsed ? <ChevronRight className="size-4" /> : <PanelLeftClose className="size-4" />}
             </button>
           </div>
@@ -435,7 +435,7 @@ export function SettingsMenu({
           <div className="flex items-center gap-2">
             <input
               type="password" value={apiKey} onChange={(e) => setApiKeyVal(e.target.value)}
-              placeholder={status?.openai_key ? "설정됨 (••••)" : "sk-..."}
+              placeholder={status?.openai_key ? t("settings.keySet") : "sk-..."}
               className="h-9 flex-1 rounded-lg border border-hairline bg-surface-soft px-3 text-[13px] outline-none focus:border-ink/40"
             />
             <button onClick={saveKey} className="h-9 rounded-lg bg-ink px-3.5 text-[13px] font-medium text-canvas">{t("settings.save")}</button>
@@ -547,7 +547,7 @@ export function SettingsMenu({
               <div className="mb-1 text-[11px] text-stone">{t("settings.elevenKey")}</div>
               <div className="flex items-center gap-2">
                 <input type="password" value={elevenKey} onChange={(e) => setElevenKeyVal(e.target.value)}
-                  placeholder={status?.elevenlabs_key ? "설정됨 (••••)" : "sk_..."}
+                  placeholder={status?.elevenlabs_key ? t("settings.keySet") : "sk_..."}
                   className="h-9 flex-1 rounded-lg border border-hairline bg-surface-soft px-3 text-[13px] outline-none focus:border-ink/40" />
                 <button onClick={async () => { const s = await api.setElevenKey(elevenKey.trim()); setElevenKeyVal(""); onStatus?.(s); }}
                   className="h-9 rounded-lg bg-ink px-3.5 text-[13px] font-medium text-canvas">{t("settings.save")}</button>

@@ -130,7 +130,7 @@ export function Onboarding({
                 <div className="mt-4 rounded-xl border border-hairline p-4">
                   <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><KeyRound className="size-4 text-steel" /> {t("ob.openaiTitle")}</div>
                   <div className="flex items-center gap-2">
-                    <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={status?.openai_key ? "설정됨 (••••)" : "sk-..."}
+                    <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={status?.openai_key ? t("settings.keySet") : "sk-..."}
                       className="h-9 flex-1 rounded-lg border border-hairline bg-surface-soft px-3 text-[13px] outline-none focus:border-ink/40" />
                     <button onClick={saveKey} className="h-9 rounded-lg bg-ink px-3.5 text-[13px] font-medium text-canvas">{t("settings.save")}</button>
                   </div>

@@ -5,6 +5,7 @@ import {
   HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Copy,
   Languages, Columns2, PanelRight, Home, History, MoreHorizontal, Ghost as GhostIcon,
 } from "lucide-react";
+// (Languages 아이콘은 헤더 지구본 언어 피커에 사용)
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
 import { Waveform } from "@/components/Waveform";
@@ -22,7 +23,7 @@ import { cn } from "@/lib/cn";
 import * as api from "@/lib/api";
 import { useListening, type Source } from "@/lib/useListening";
 import { getDemo } from "@/lib/demo";
-import { LangProvider, makeT, useT, type Lang } from "@/lib/i18n";
+import { LangProvider, makeT, useT, detectLang, LANGS, type Lang } from "@/lib/i18n";
 
 type CardItem = {
   kind: "card";
@@ -49,8 +50,8 @@ const CHAT_RE = /^\s*(안녕[하세요가]*|반가워?요?|고마워요?|고맙[
 const LIVE_THRESH: Record<string, number> = { off: 2, conservative: 0.8, eager: 0.5 };
 const LIVE_COOLDOWN_MS = 90_000;  // 실시간 카드 최대 1개 / 90초
 
-/** 진행 메시지 앞에 붙는 글리프 — 커넥터/도구별 브랜드 로고 또는 의미 아이콘. */
-function ProgressGlyph({ text, active }: { text: string; active: boolean }) {
+/** 진행 메시지 앞에 붙는 글리프 — kind 메타(언어 무관) 우선, 텍스트 패턴은 폴백. */
+function ProgressGlyph({ text, kind, active }: { text: string; kind?: string; active: boolean }) {
   const t = text || "";
   const brand =
     /^atlassian/i.test(t) ? "atlassian" :
@@ -60,18 +61,20 @@ function ProgressGlyph({ text, active }: { text: string; active: boolean }) {
     /^github/i.test(t) ? "github" :
     /hugging\s*face/i.test(t) ? "huggingface" : null;
   if (brand) return <span className="grid size-3.5 shrink-0 place-items-center"><BrandIcon name={brand} size={13} /></span>;
-  if (/^웹\s*검색/.test(t)) return <Globe className="size-3.5 shrink-0 text-stone" />;
-  if (/^실행/.test(t)) return <Terminal className="size-3.5 shrink-0 text-stone" />;
-  if (/^💭/.test(t)) return <Sparkles className="size-3.5 shrink-0 text-stone" />;
-  if (/^파일\s*검색/.test(t)) return <Search className="size-3.5 shrink-0 text-stone" />;
+  if (kind === "web" || /^(웹\s*검색|Web search|网页搜索)/i.test(t)) return <Globe className="size-3.5 shrink-0 text-stone" />;
+  if (kind === "command" || /^(실행|Run|执行)[::]/.test(t)) return <Terminal className="size-3.5 shrink-0 text-stone" />;
+  if (kind === "think" || /^💭/.test(t)) return <Sparkles className="size-3.5 shrink-0 text-stone" />;
+  if (kind === "file" || /^(파일\s*검색|Searching files|正在搜索文件)/i.test(t)) return <Search className="size-3.5 shrink-0 text-stone" />;
   return <span className={cn("size-1.5 shrink-0 rounded-full bg-spark", active && "soul-pulse")} />;
 }
 
+const RUN_PREFIX_RE = /^(실행|Run|执行)[::]\s*/;
+
 /** 진행 한 줄. bash 실행은 터미널 칩으로 예쁘게, 그 외는 글리프 + 텍스트. */
-function ProgressLine({ text, active }: { text: string; active: boolean }) {
+function ProgressLine({ text, kind, active }: { text: string; kind?: string; active: boolean }) {
   const t = text || "";
-  if (/^실행:/.test(t)) {
-    const cmd = t.replace(/^실행:\s*/, "");
+  if (RUN_PREFIX_RE.test(t)) {
+    const cmd = t.replace(RUN_PREFIX_RE, "");
     return (
       <>
         <Terminal className="size-3.5 shrink-0 text-stone" />
@@ -83,7 +86,7 @@ function ProgressLine({ text, active }: { text: string; active: boolean }) {
   }
   return (
     <>
-      <ProgressGlyph text={t} active={active} />
+      <ProgressGlyph text={t} kind={kind} active={active} />
       <span className="truncate">{t}</span>
     </>
   );
@@ -94,7 +97,7 @@ function CommandStep({ item, active }: { item: api.ProgressItem; active: boolean
   void active;
   const { t } = useT();
   const [open, setOpen] = useState(false);
-  const cmd = (item.full || item.text.replace(/^실행:\s*/, "")).trim();
+  const cmd = (item.full || item.text.replace(RUN_PREFIX_RE, "")).trim();
   const st = item.status;
   const stLabel = st === "running" ? t("card.cmdRunning") : st === "failed" ? t("card.cmdFailed") : st === "done" ? t("card.cmdDone") : "";
   const badge =
@@ -206,7 +209,8 @@ export default function App() {
   const [source, setSource] = usePref<Source>("ghost.source", "mic");
   const [voiceOn, setVoiceOn] = usePref<boolean>("ghost.voiceOn", false);
   const [dark, setDark] = usePref<boolean>("ghost.dark", false);
-  const [lang, setLangPref] = usePref<Lang>("ghost.lang", "ko");
+  const [lang, setLangPref] = usePref<Lang>("ghost.lang", detectLang());   // 첫 실행은 시스템 언어
+  const [langMenuOpen, setLangMenuOpen] = useState(false);   // 헤더 지구본 언어 피커
   const t = useMemo(() => makeT(lang), [lang]);
   const changeLang = useCallback((l: Lang) => { setLangPref(l); api.setLang(l); }, [setLangPref]);
   const [thinking, setThinking] = useState(false);
@@ -312,7 +316,7 @@ export default function App() {
     // 저장된 5분 다이제스트도 함께 복원(최근 2개) — 재시작 후에도 회의 흐름이 보인다.
     const digests = await api.getDigests(m.id);
     for (const d of digests.slice(-2)) {
-      if (d?.spec) pushFeed({ kind: "card", id: newId(), query: `${m.title} · 다이제스트`, status: "done", progress: [], spec: d.spec });
+      if (d?.spec) pushFeed({ kind: "card", id: newId(), query: `${m.title} · ${t("digest.label")}`, status: "done", progress: [], spec: d.spec });
     }
   }, [pushFeed, t]);
   useEffect(() => { loadRecentMeetings(); }, [loadRecentMeetings]);
@@ -496,7 +500,7 @@ export default function App() {
   }, []);
 
   const showChat = useCallback((query: string, say: string) => {
-    const reply = say || "네, 듣고 있어요. 무엇을 도와드릴까요?";
+    const reply = say || t("chat.defaultReply");
     const spec: Spec = { title: "Ghost", spoken: reply, intent: "answer", blocks: [{ type: "text", text: reply }] };
     pushFeed({ kind: "card", id: newId(), query, status: "chat", progress: [], spec, backend: "Ghost" });
     pushHistory(`Ghost: ${reply}`);
@@ -537,7 +541,7 @@ export default function App() {
           else {
             updateCard(id, { status: "done", spec, backend });
             pushHistory(`Ghost[${spec?.title || ""}]: ${(spec?.spoken || blocks.find((b) => b.type === "text")?.text || "").slice(0, 180)}`);
-            notify(spec?.title || "Ghost", spec?.spoken || "새 카드가 도착했어요");
+            notify(spec?.title || "Ghost", spec?.spoken || t("notify.newCard"));
             // 플로팅 오브가 떠 있으면 — 회의 중 자기 생각을 밝히듯 말풍선으로 알린다.
             try { (window as any).ghost?.orbBubble?.(spec?.spoken || spec?.title || ""); } catch { /* ignore */ }
             if (opts.voice && spec?.spoken) speak(spec.spoken);
@@ -566,7 +570,7 @@ export default function App() {
     const transcriptStr = transcriptRef.current.join("\n");
     if (transcriptStr.trim().length < 20) { flash(t("toast.minutesShort")); return; }
     // meeting_id가 있으면 서버가 저장된 전사 전체를 쓴다(클라 200줄 제한 우회).
-    runStream({ query: "회의록", ack: ackText || "회의록을 정리하고 있어요…", pinned: true, starter: (h) => api.streamMinutes(transcriptStr, h, meetingIdRef.current) });
+    runStream({ query: t("minutes.query"), ack: ackText || t("minutes.ack"), pinned: true, starter: (h) => api.streamMinutes(transcriptStr, h, meetingIdRef.current) });
   }, [runStream, t]);
 
   // 5분 다이제스트(설정 가능) — 회의의 기본 능동 동작. 롤링 요약 + 미해결 1건 자동조사.
@@ -576,7 +580,7 @@ export default function App() {
     digestBusyRef.current = true;
     const backstop = setTimeout(() => { digestBusyRef.current = false; }, 90000);  // 멈춰도 다음 주기는 풀림
     runStream({
-      query: "다이제스트", ack: "", pinned: true, dropIfEmpty: true,
+      query: t("digest.label"), ack: "", pinned: true, dropIfEmpty: true,
       starter: (h) => api.streamDigest(mid, {
         onProgress: h.onProgress,
         // 요약 카드(첫 result)가 오면 busy 해제 — 조사는 백그라운드로 이어지고 다음 주기는 자유롭게.
@@ -652,7 +656,7 @@ export default function App() {
     if (r.kind === "chat") { showChat(q || text, r.say || ""); if (wake && r.say) speak(r.say); return; }
     // 웨이크워드 호출 = 명시 커맨드 → 항상 수행(게이트 우회).
     if (wake) {
-      if (r.kind === "none") { speak("네, 부르셨어요?"); return; }
+      if (r.kind === "none") { speak(t("wake.here")); return; }
       if (actingRef.current || queueRef.current.length) return;
       startAction(r.query || q || text, r.say || "", historyRef.current.join("\n"), true);
       return;
@@ -784,7 +788,7 @@ export default function App() {
     pushFeed({ kind: "user", id: newId(), text: q });   // 사용자 입력 즉시 우측 편입
     pushHistory(`요청: ${q}`);
     // 회의록/이미지 요청은 회의록 생성 경로(실제 이미지)로
-    if (isMinutesReq(q) && transcriptRef.current.length) { generateMinutes("네, 전체 회의록과 손글씨 이미지까지 정리해 드릴게요."); return; }
+    if (isMinutesReq(q) && transcriptRef.current.length) { generateMinutes(t("minutes.ackFull")); return; }
     // 순수 인사는 네트워크 없이 즉답(로컬 정규식).
     if (CHAT_RE.test(q)) { showChat(q, ""); return; }
     const qResolved = await resolveRefs(q);   // @[지난 회의] 참조 주입
@@ -803,10 +807,10 @@ export default function App() {
     const ts = transcriptRef.current;
     const cards = feed.filter((x): x is CardItem => x.kind === "card" && x.status === "done" && !!x.spec);
     if (!ts.length && !cards.length) { flash(t("toast.exportEmpty")); return; }
-    const lines: string[] = ["# Ghost 회의 기록", ""];
-    if (ts.length) lines.push("## 전사", "", ...ts.map((t) => `- ${t}`), "");
+    const lines: string[] = [`# ${t("export.title")}`, ""];
+    if (ts.length) lines.push(`## ${t("export.transcript")}`, "", ...ts.map((t) => `- ${t}`), "");
     if (cards.length) {
-      lines.push("## Ghost 카드", "");
+      lines.push(`## ${t("export.cards")}`, "");
       for (const c of cards) {
         const s = c.spec!;
         lines.push(`### ${s.title || c.query}`);
@@ -827,7 +831,7 @@ export default function App() {
       const a = document.createElement("a");
       const d = new Date();
       const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}-${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}`;
-      a.href = url; a.download = `ghost-회의기록-${stamp}.md`;
+      a.href = url; a.download = `${t("export.filename")}-${stamp}.md`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
       flash(t("toast.exportSaved"));
@@ -905,7 +909,7 @@ export default function App() {
         demo.cards.filter((c) => c.afterLine === i).forEach((c) => {
           const id = newId();
           timers.push(setTimeout(() => setFeed((f) => [...f, { kind: "card", id, query: c.query, ack: c.ack, status: "working", progress: [{ text: t("trans.listening") }] }]), 400));
-          timers.push(setTimeout(() => updateCard(id, { status: "done", spec: c.spec, backend: "데모" }), 1700));
+          timers.push(setTimeout(() => updateCard(id, { status: "done", spec: c.spec, backend: t("demo.backend") }), 1700));
         });
       }, delay));
       delay += 1500;
@@ -1015,6 +1019,25 @@ export default function App() {
               </button>
             ))}
           </div>
+          {/* UI 언어(지구본) — 한국어/English/中文 */}
+          <div className="relative">
+            <button onClick={() => setLangMenuOpen((v) => !v)} title={t("header.uiLang")}
+              className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><Languages className="size-4" /></button>
+            {langMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setLangMenuOpen(false)} />
+                <div className="absolute right-0 top-9 z-30 min-w-[130px] rounded-xl border border-hairline bg-background p-1 shadow-lg">
+                  {LANGS.map((l) => (
+                    <button key={l.id} onClick={() => { changeLang(l.id); setLangMenuOpen(false); }}
+                      className={cn("flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px]",
+                        lang === l.id ? "bg-surface font-medium text-foreground" : "text-steel hover:bg-surface-soft")}>
+                      {l.label}{lang === l.id && <Check className="ml-auto size-3.5 text-spark-deep" />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           {!!g.hideToOrb && (
             <button onClick={() => g.hideToOrb()} title={t("orb.collapse")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><GhostIcon className="size-4" /></button>
           )}
@@ -1042,7 +1065,7 @@ export default function App() {
                 <button key={m.id} onClick={() => openMeetingCard(m)}
                   className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface">
                   <span className="truncate text-[12.5px] text-charcoal">{m.title}</span>
-                  <span className="text-[10.5px] text-stone">{m.duration_sec ? `${Math.max(1, Math.round(m.duration_sec / 60))}분` : `${m.utterance_count ?? 0}발화`}{m.has_minutes ? " · 회의록" : ""}</span>
+                  <span className="text-[10.5px] text-stone">{m.duration_sec ? t("hist.mins", { n: Math.max(1, Math.round(m.duration_sec / 60)) }) : t("hist.utts", { n: m.utterance_count ?? 0 })}{m.has_minutes ? ` · ${t("hist.minutesBadge")}` : ""}</span>
                 </button>
               ))}
             </div>
@@ -1121,9 +1144,9 @@ export default function App() {
             <div className="flex items-center gap-2 px-4 pb-2">
               {source === "mic" && mics.length > 1 && (
                 <select value={micId} onChange={(e) => setMicId(e.target.value)} disabled={active}
-                  title="마이크 장치" className="h-7 max-w-[180px] truncate rounded-lg border border-hairline bg-surface-soft px-2 text-[11.5px] text-steel outline-none focus:border-ink/40 disabled:opacity-50">
+                  title={t("trans.micDevice")} className="h-7 max-w-[180px] truncate rounded-lg border border-hairline bg-surface-soft px-2 text-[11.5px] text-steel outline-none focus:border-ink/40 disabled:opacity-50">
                   <option value="">{t("trans.micDefault")}</option>
-                  {mics.map((m) => <option key={m.deviceId} value={m.deviceId}>{m.label || `마이크 ${m.deviceId.slice(0, 4)}`}</option>)}
+                  {mics.map((m) => <option key={m.deviceId} value={m.deviceId}>{m.label || t("trans.micN", { id: m.deviceId.slice(0, 4) })}</option>)}
                 </select>
               )}
               {searchOpen && (
@@ -1305,7 +1328,7 @@ export default function App() {
                           const op = last ? 1 : Math.max(0.22, 0.66 - (it.progress.length - 1 - i) * 0.16);
                           if (p.kind === "command")
                             return <div key={p.id || i} style={{ opacity: op }} className="wisp"><CommandStep item={p} active={last} /></div>;
-                          return <div key={i} style={{ opacity: op }} className={cn("wisp flex items-center gap-2 text-[12px]", last ? "haze text-foreground" : "text-stone")}><ProgressLine text={p.text} active={last} /></div>;
+                          return <div key={i} style={{ opacity: op }} className={cn("wisp flex items-center gap-2 text-[12px]", last ? "haze text-foreground" : "text-stone")}><ProgressLine text={p.text} kind={p.kind} active={last} /></div>;
                         })}
                       </div>
                       <div className="space-y-2 pt-0.5"><div className="mist h-2.5 w-3/4 rounded-full" /><div className="mist h-2.5 w-1/2 rounded-full" /></div>
@@ -1343,7 +1366,7 @@ export default function App() {
             </div>
           )}
           <div className="relative flex items-center gap-2">
-            <button onClick={toggleActive} title={active ? "청취 정지" : "상시 청취 시작"}
+            <button onClick={toggleActive} title={active ? t("footer.listenStop") : t("footer.listenStart")}
               className={cn("relative grid size-10 shrink-0 place-items-center rounded-full transition-colors", active ? "bg-ink text-canvas" : "border border-hairline bg-canvas text-steel hover:text-foreground")}>
               {active && <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-spark ring-2 ring-background" />}
               {active ? <Square className="size-3.5" /> : <Mic className="size-4" />}

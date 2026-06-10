@@ -210,6 +210,39 @@ class BrainConfig:
 
 LANG_NAME = {"ko": "한국어", "en": "English", "zh": "中文(简体)"}
 
+# UI로 흘러가는 진행 문구·짧은 멘트의 3개 국어 사전 — LLM 출력은 _lang_line이 맡지만,
+# 코드가 직접 만드는 라벨(웹 검색/실행/회의록 정리 중…)은 여기서 언어를 따른다.
+_UI_LABELS = {
+    "web_search":      {"ko": "웹 검색: {q}", "en": "Web search: {q}", "zh": "网页搜索：{q}"},
+    "web_searching":   {"ko": "웹 검색 중…", "en": "Searching the web…", "zh": "正在搜索网页…"},
+    "file_searching":  {"ko": "파일 검색 중…", "en": "Searching files…", "zh": "正在搜索文件…"},
+    "thinking":        {"ko": "생각하는 중…", "en": "Thinking…", "zh": "思考中…"},
+    "run":             {"ko": "실행: {c}", "en": "Run: {c}", "zh": "执行：{c}"},
+    "running":         {"ko": "명령 실행 중…", "en": "Running a command…", "zh": "正在执行命令…"},
+    "mcp_using":       {"ko": "{name} 사용 중…", "en": "Using {name}…", "zh": "正在使用 {name}…"},
+    "mcp_failed":      {"ko": "{label} — 실패, 다른 방법 시도", "en": "{label} — failed, trying another way", "zh": "{label} — 失败，尝试其他方式"},
+    "minutes_working": {"ko": "회의록 정리 중…", "en": "Writing the minutes…", "zh": "正在整理会议纪要…"},
+    "minutes_retry":   {"ko": "회의록이 비어 다시 정리 중…", "en": "Minutes came back empty — retrying…", "zh": "纪要为空，正在重试…"},
+    "sketch_working":  {"ko": "손글씨 회의록 그리는 중…", "en": "Drawing the sketchnote…", "zh": "正在绘制手绘纪要…"},
+    "sketch_skipped":  {"ko": "손글씨 이미지는 이번엔 만들지 못했어요(회의록은 완료)", "en": "Couldn't make the sketchnote this time (minutes are done)", "zh": "这次未能生成手绘图（纪要已完成）"},
+    "resp_fail":       {"ko": "응답 실패", "en": "Response failed", "zh": "响应失败"},
+    "login_expired":   {"ko": "Codex 로그인이 만료됐어요. 터미널에서 `codex login`으로 다시 로그인한 뒤 시도해 주세요.",
+                        "en": "Codex login expired. Run `codex login` in a terminal and try again.",
+                        "zh": "Codex 登录已过期。请在终端运行 `codex login` 后重试。"},
+    "task_fail":       {"ko": "작업을 완료하지 못했어요: {m}", "en": "Couldn't complete the task: {m}", "zh": "未能完成任务：{m}"},
+    "chat_fallback":   {"ko": "네, 듣고 있어요. 무엇을 도와드릴까요?", "en": "Yes, I'm listening. How can I help?", "zh": "在听呢，需要我帮什么？"},
+}
+
+
+def _ui(key: str, cfg: Optional["BrainConfig"] = None, **fmt) -> str:
+    lang = (cfg.lang if cfg else "ko") or "ko"
+    entry = _UI_LABELS.get(key, {})
+    s = entry.get(lang) or entry.get("ko") or key
+    try:
+        return s.format(**fmt)
+    except Exception:  # noqa: BLE001
+        return s
+
 
 def _lang_line(cfg: "BrainConfig") -> str:
     return f"\n[출력 언어] 모든 텍스트(title·spoken·blocks·say)를 반드시 {LANG_NAME.get(cfg.lang, '한국어')}로 작성한다."
@@ -616,7 +649,7 @@ def chat_reply(utterance: str, context: str = "", cfg: Optional["BrainConfig"] =
     """직접 말 걸기에 대한 빠른 대화 응답. 설정된 백엔드 사용. GenUI 스펙으로 반환."""
     cfg = cfg or BrainConfig()
     user = (f"[최근 대화]\n{context}\n\n" if context else "") + f"[사용자]\n{utterance}"
-    reply = _brain_text(CHAT_SYSTEM + _lang_line(cfg), user, cfg, timeout=60) or "네, 듣고 있어요. 무엇을 도와드릴까요?"
+    reply = _brain_text(CHAT_SYSTEM + _lang_line(cfg), user, cfg, timeout=60) or _ui("chat_fallback", cfg)
     return {
         "title": "Ghost",
         "spoken": reply,
@@ -731,12 +764,12 @@ def _short(s: str, n: int = 52) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def _mcp_label(item: dict) -> str:
+def _mcp_label(item: dict, cfg: Optional["BrainConfig"] = None) -> str:
     """mcp_tool_call 이벤트 → 'Hugging Face · bert 모델 검색' 같은 구체 라벨."""
     server = item.get("server") or ""
     tool = item.get("tool") or ""
     args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
-    name = _CONNECTOR_KO.get(server, server or "커넥터")
+    name = _CONNECTOR_KO.get(server, server or "MCP")
     # codex MCP 호출은 보통 arguments.title에 사람이 읽는 요약을 담는다.
     hint = (
         args.get("title") or args.get("summary") or args.get("description")
@@ -748,15 +781,15 @@ def _mcp_label(item: dict) -> str:
         return f"{name} · {_short(hint)}"
     if tool and tool not in ("js", "python", "run"):
         return f"{name} · {tool}"
-    return f"{name} 사용 중…"
+    return _ui("mcp_using", cfg, name=name)
 
 
-def _friendly_error(msg: str) -> str:
+def _friendly_error(msg: str, cfg: Optional["BrainConfig"] = None) -> str:
     """codex turn 실패 메시지를 사용자용 안내로 변환."""
     m = (msg or "").lower()
     if any(k in m for k in ("refresh", "sign in", "log out", "logout", "401", "unauthorized", "token")):
-        return "Codex 로그인이 만료됐어요. 터미널에서 `codex login`으로 다시 로그인한 뒤 시도해 주세요."
-    return f"작업을 완료하지 못했어요: {msg}"
+        return _ui("login_expired", cfg)
+    return _ui("task_fail", cfg, m=msg)
 
 
 def _command_full(item: dict) -> str:
@@ -770,10 +803,10 @@ def _command_full(item: dict) -> str:
     return str(cmd or "").strip()
 
 
-def _command_label(item: dict) -> str:
-    """command_execution / local_shell_call → '실행: <명령>'."""
+def _command_label(item: dict, cfg: Optional["BrainConfig"] = None) -> str:
+    """command_execution / local_shell_call → '실행: <명령>'(언어 따름)."""
     cmd = _command_full(item)
-    return f"실행: {_short(cmd)}" if cmd else "명령 실행 중…"
+    return _ui("run", cfg, c=_short(cmd)) if cmd else _ui("running", cfg)
 
 
 def act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] = None, system: str = ACT_SYSTEM):
@@ -858,29 +891,29 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
             if it == "mcp_tool_call":
                 # 인자(title/query 등)는 시작 시점에 이미 있다 → started에서 구체 라벨.
                 if etype == "item.started":
-                    out = emit(_mcp_label(item))
+                    out = emit(_mcp_label(item, cfg), kind="mcp")
                 elif item.get("status") == "failed":
-                    out = emit(f"{_mcp_label(item)} — 실패, 다른 방법 시도")
+                    out = emit(_ui("mcp_failed", cfg, label=_mcp_label(item, cfg)), kind="mcp")
             elif it == "web_search":
                 # query는 completed에서 채워진다.
                 if etype == "item.completed":
                     q = item.get("query") or (item.get("action") or {}).get("query") or ""
-                    out = emit(f"웹 검색: {_short(q)}" if q else "웹 검색 중…")
+                    out = emit(_ui("web_search", cfg, q=_short(q)) if q else _ui("web_searching", cfg), kind="web")
             elif it in ("command_execution", "local_shell_call"):
                 full = _command_full(item)
                 if etype == "item.started":
-                    out = emit(_command_label(item), kind="command", id=item.get("id"), full=full, status="running")
+                    out = emit(_command_label(item, cfg), kind="command", id=item.get("id"), full=full, status="running")
                 elif etype == "item.completed":
                     st = "failed" if item.get("status") == "failed" else "done"
-                    out = emit(_command_label(item), kind="command", id=item.get("id"), full=full, status=st)
+                    out = emit(_command_label(item, cfg), kind="command", id=item.get("id"), full=full, status=st)
             elif it == "file_search":
                 if etype == "item.started":
-                    out = emit("파일 검색 중…")
+                    out = emit(_ui("file_searching", cfg), kind="file")
             elif it == "reasoning":
                 # 추론 요약 텍스트가 있으면 그대로(짧게) 보여준다.
                 if etype == "item.completed":
                     txt = item.get("text") or item.get("summary") or ""
-                    out = emit(f"💭 {_short(txt)}" if txt else "생각하는 중…")
+                    out = emit(f"💭 {_short(txt)}" if txt else _ui("thinking", cfg), kind="think")
             elif it == "agent_message" and etype == "item.completed":
                 txt = (item.get("text") or "").strip()
                 final_text = txt or final_text
@@ -900,10 +933,10 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
     if spec is None and error_msg:
         # turn 실패(예: codex 로그인 만료) → 질문을 echo하지 말고 솔직히 알린다.
         yield ("result", {
-            "title": "응답 실패",
+            "title": _ui("resp_fail", cfg),
             "spoken": "",
             "intent": "none",
-            "blocks": [{"type": "callout", "value": "error", "text": _friendly_error(error_msg)}],
+            "blocks": [{"type": "callout", "value": "error", "text": _friendly_error(error_msg, cfg)}],
         })
         return
     # JSON이 없으면 모델이 실제로 한 말(final_text)을 본문으로. 그것도 없으면 질문.
@@ -938,7 +971,7 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: 
 
     # 1) 구조화 회의록 — act_stream을 그대로 흘려보내 codex의 중간 과정(웹검색·커넥터·명령)이
     #    카드에 실시간 표시된다. (이전엔 블로킹 act()라 '정리 중…' 한 줄만 보였다.)
-    yield ("progress", "회의록 정리 중…")
+    yield ("progress", _ui("minutes_working", cfg))
     spec: Optional[dict] = None
     for kind, payload in act_stream(query, user_input, cfg, system):
         if kind == "progress":
@@ -947,7 +980,7 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: 
             spec = payload
     if not _spec_has_content(spec):
         # 일시 오류(토큰 레이스·타임아웃 등)로 빈 회의록이 나오면 한 번 재시도 — 빈 minutes.json 저장 방지.
-        yield ("progress", "회의록이 비어 다시 정리 중…")
+        yield ("progress", _ui("minutes_retry", cfg))
         retry: Optional[dict] = None
         for kind, payload in act_stream(query, user_input, cfg, system):
             if kind == "progress":
@@ -964,7 +997,7 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: 
         return
 
     # 2) 손글씨 이미지(느림·불안정)는 best-effort로 뒤에 붙여 두 번째 result로 갱신.
-    yield ("progress", "손글씨 회의록 그리는 중…")
+    yield ("progress", _ui("sketch_working", cfg))
     img_path = os.path.join(tempfile.gettempdir(), f"ghost_minutes_{os.getpid()}_{abs(hash(transcript)) % 100000}.png")
     try:
         if os.path.exists(img_path):
@@ -985,6 +1018,6 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: 
             spec["blocks"].append({"type": "image", "url": f"data:image/png;base64,{data}", "label": "Ghost 손글씨 회의록"})
             yield ("result", spec)  # ← 이미지 포함해 카드 갱신
         else:
-            yield ("progress", "손글씨 이미지는 이번엔 만들지 못했어요(회의록은 완료)")
+            yield ("progress", _ui("sketch_skipped", cfg))
     except Exception:  # noqa: BLE001
         pass  # 이미지는 부가 기능 — 실패해도 텍스트 회의록은 이미 전달됨
