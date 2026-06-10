@@ -426,6 +426,75 @@ def append_digest(meeting_id: str, spec: dict) -> None:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def read_digests(meeting_id: str) -> List[dict]:
+    """저장된 5분 다이제스트 기록 [{t, spec}] — 재시작 후에도 UI가 복원할 수 있게."""
+    path = _meeting_path(meeting_id) / "digests.jsonl"
+    if not path.exists():
+        return []
+    out: List[dict] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if raw:
+            try:
+                out.append(json.loads(raw))
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
+def append_note(meeting_id: str, text: str, author: str = "agent") -> bool:
+    """외부 에이전트(MCP)가 회의에 메모를 남긴다 — notes.jsonl에 append(전사·회의록은 불변)."""
+    text = (text or "").strip()
+    if not text:
+        return False
+    with _LOCK:
+        folder = _meeting_path(meeting_id)
+        if not folder.exists():
+            return False
+        rec = {"t": _now_iso(), "author": (author or "agent").strip()[:40], "text": text[:2000]}
+        with open(folder / "notes.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return True
+
+
+def read_notes(meeting_id: str) -> List[dict]:
+    """외부 에이전트가 남긴 메모 [{t, author, text}]."""
+    path = _meeting_path(meeting_id) / "notes.jsonl"
+    if not path.exists():
+        return []
+    out: List[dict] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if raw:
+            try:
+                out.append(json.loads(raw))
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
+def delete_meeting(meeting_id: str) -> bool:
+    """회의 폴더를 통째로 삭제(전사·회의록·다이제스트 포함). 프라이버시 제품의 기본 권리.
+
+    경로 탈출 방지: meeting_id가 meetings_dir 바로 아래의 디렉터리일 때만 지운다.
+    """
+    import shutil as _shutil
+    mid = (meeting_id or "").strip()
+    if not mid or "/" in mid or "\\" in mid or mid.startswith("."):
+        return False
+    with _LOCK:
+        folder = _meeting_path(mid)
+        try:
+            if folder.resolve().parent != meetings_dir().resolve():
+                return False
+        except OSError:
+            return False
+        if not folder.is_dir():
+            return False
+        _shutil.rmtree(folder, ignore_errors=True)
+        return not folder.exists()
+
+
 # ── 목록 / 검색 (MCP·과거 회의 접근) ────────────────────────────────────────
 def list_meetings(limit: int = 50) -> List[dict]:
     """최근 회의 메타 요약 목록 (최신순). MCP list_meetings용."""
@@ -460,6 +529,9 @@ def get_meeting(meeting_id: str, include_transcript: bool = True) -> Optional[di
     minutes = get_minutes(meeting_id)
     if minutes is not None:
         out["minutes"] = minutes
+    notes = read_notes(meeting_id)
+    if notes:
+        out["notes"] = notes
     if include_transcript:
         out["transcript"] = transcript_text(meeting_id)
     return out

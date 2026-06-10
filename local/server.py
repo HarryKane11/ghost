@@ -78,6 +78,7 @@ def _persist_env(key: str, value: str) -> None:
         if not found:
             out.append(f"{key}={value}")
         p.write_text("\n".join(out) + "\n", encoding="utf-8")
+        os.chmod(p, 0o600)   # API 키 평문 파일 — 소유자만 읽게(백업·멀티유저 노출 방지)
     except Exception:  # noqa: BLE001 — 영속 실패해도 런타임 환경변수는 이미 설정됨
         pass
 
@@ -85,9 +86,26 @@ def _persist_env(key: str, value: str) -> None:
 _load_dotenv()
 
 app = FastAPI(title="Ghost Local Backend")
+# CORS: 렌더러(localhost vite/내부 http 서버)만 허용. 이전의 "*"는 브라우저의 아무 사이트가
+# localhost:8765로 회의 전사를 읽어갈 수 있는 구멍이었다.
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_methods=["*"], allow_headers=["*"],
 )
+
+# 토큰 인증: 데스크탑 앱이 기동 시 GHOST_TOKEN을 발급해 백엔드와 렌더러에 같이 꽂는다.
+# 토큰이 설정된 경우에만 강제(수동 uvicorn 개발 흐름은 그대로 동작). /api/health는 예외(버전 식별용).
+_AUTH_TOKEN = (os.environ.get("GHOST_TOKEN") or "").strip()
+
+
+@app.middleware("http")
+async def _auth_guard(request, call_next):
+    if _AUTH_TOKEN and request.url.path.startswith("/api") and request.url.path != "/api/health":
+        if request.method != "OPTIONS" and request.headers.get("x-ghost-token", "") != _AUTH_TOKEN:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await call_next(request)
 
 # 기본은 Cloud(가벼움) — STT=ElevenLabs(키), brain=Codex(auth). 로컬은 설치해야 쓰는 옵션.
 STATE = {"backend": "codex", "stt_ready": False, "codex_model": None, "reasoning_effort": "low", "lang": "ko", "stt_provider": "elevenlabs"}
@@ -537,6 +555,20 @@ def end_meeting_ep(meeting_id: str) -> dict:
     return {"ok": meta is not None, "meeting": meta}
 
 
+@app.delete("/api/meetings/{meeting_id}")
+def delete_meeting_ep(meeting_id: str) -> dict:
+    """회의 폴더 영구 삭제(전사·회의록·다이제스트 포함). 프라이버시 기본 권리."""
+    return {"ok": store.delete_meeting(meeting_id)}
+
+
+@app.get("/api/meetings/{meeting_id}/digests")
+def get_digests_ep(meeting_id: str) -> dict:
+    """저장된 5분 다이제스트 기록 — 재시작 후 UI 복원용."""
+    if store.get_meta(meeting_id) is None:
+        return {"digests": []}
+    return {"digests": store.read_digests(meeting_id)}
+
+
 class ContextReq(BaseModel):
     context: str
 
@@ -706,6 +738,10 @@ async def ws_stt(ws: WebSocket) -> None:
     바이너리 프레임 = 오디오. 텍스트 '{"final":true}' = 클라 VAD 엔드포인트 신호.
     """
     await ws.accept()
+    # 브라우저 WebSocket은 커스텀 헤더를 못 보내므로 토큰은 쿼리로 검증.
+    if _AUTH_TOKEN and ws.query_params.get("token", "") != _AUTH_TOKEN:
+        await ws.close(code=4401)
+        return
     mid = ws.query_params.get("meeting_id", "")
     src = ws.query_params.get("source", "mic")
 
@@ -838,8 +874,15 @@ def stt_select(req: SttSelectReq) -> dict:
 
 
 # ── STT ─────────────────────────────────────────────────────────────────────
+def _secure_tmp(prefix: str, suffix: str = "") -> str:
+    """0600 권한 임시 파일 — 멀티유저 시스템에서 회의 오디오가 타 계정에 노출되지 않게."""
+    fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix)
+    os.close(fd)
+    return path
+
+
 def _to_wav(src: str) -> str:
-    dst = os.path.join(tempfile.gettempdir(), f"ghost_in_{uuid.uuid4().hex}.wav")
+    dst = _secure_tmp("ghost_in_", ".wav")
     subprocess.run(["ffmpeg", "-y", "-i", src, "-ar", "16000", "-ac", "1", dst], capture_output=True, check=False)
     return dst
 
@@ -855,14 +898,30 @@ def _wav_seconds(path: str) -> float:
         return 0.0
 
 
+# Whisper류가 무음에서 지어내는 전형적 보일러플레이트(언어 불문 안전하게 거를 수 있는 것만).
+_HALLU_BOILERPLATE = (
+    "thank you for watching", "thanks for watching", "please subscribe",
+    "시청해 주셔서 감사합니다", "구독과 좋아요", "다음 영상에서 만나요",
+    "ご視聴ありがとうございました",
+)
+
+
 def _looks_like_hallucination(text: str) -> bool:
-    """무음·잡음에서 STT가 지어낸 환각 추정. 한국어 위주 회의 기준:
-    한글 0개 + 짧은 영어 + 숫자/약어 없음 → 환각으로 보고 버린다.
-    (영어 기술용어는 보통 한글과 섞이거나 숫자/대문자 약어를 포함하므로 보존됨.)
+    """무음·잡음에서 STT가 지어낸 환각 추정 — UI 언어를 존중한다.
+
+    이전 규칙(한글 0개 + 짧은 영어 → 버림)은 영어 회의에서 "okay sounds good" 같은
+    정상 발화를 통째로 버렸다. 이제:
+      · ko 모드: 기존 규칙 유지(한국어 회의에 끼어드는 짧은 영어 환각 차단)
+      · 그 외(en/zh 등): 언어 불문 보일러플레이트 문구만 거른다(짧은 발화는 보존).
     """
     t = (text or "").strip()
     if not t:
         return True
+    low = t.lower()
+    if any(b in low for b in _HALLU_BOILERPLATE):
+        return True
+    if STATE.get("lang", "ko") != "ko":
+        return False   # 비한국어 모드: 짧다고 버리지 않는다
     import re
     has_hangul = bool(re.search(r"[가-힣]", t))
     if has_hangul:
@@ -884,13 +943,15 @@ def _bg_fold(meeting_id: str) -> None:
 
 @app.post("/api/transcribe")
 async def transcribe(audio: UploadFile = File(...), meeting_id: str = Form(""), source: str = Form("mic")) -> dict:
-    raw = os.path.join(tempfile.gettempdir(), f"ghost_up_{uuid.uuid4().hex}")
+    raw = _secure_tmp("ghost_up_")
     with open(raw, "wb") as f:
         shutil.copyfileobj(audio.file, f)
     wav = _to_wav(raw)
     # 실제로 어떤 경로(provider/model/engine)가 전사했는지 추적해 응답에 에코한다
     # → 클라가 "지금 진짜 이 모델로 전사 중"을 배지로 보여줄 수 있다(모델 전환 신뢰성).
     used = {"provider": "local", "model": stt.active_model(), "engine": stt._engine(stt.active_model())}
+    # 로컬 폴백이 실제로 가능한지(엔진 설치 + 모델 보유) — 불가능하면 연쇄 예외로 500이 나던 경로.
+    local_ok = stt.engine_available(stt._engine(stt.active_model()))
     try:
         if STATE.get("stt_provider") == "elevenlabs" and stt_cloud.elevenlabs_key():
             try:
@@ -904,6 +965,17 @@ async def transcribe(audio: UploadFile = File(...), meeting_id: str = Form(""), 
                 except Exception:  # noqa: BLE001
                     pass
             except Exception:
+                if not local_ok:
+                    # 클라우드 실패 + 로컬 미설치 → 연쇄 예외 대신 명확한 안내로.
+                    from fastapi.responses import JSONResponse
+                    for p in (raw, wav):
+                        try:
+                            os.unlink(p)
+                        except OSError:
+                            pass
+                    return JSONResponse({"error": "stt_unavailable",
+                                         "message": "클라우드 전사 실패 + 로컬 STT 미설치 — 키/네트워크를 확인하거나 설정에서 로컬 모델을 설치하세요."},
+                                        status_code=503)
                 text = stt.transcribe(wav)  # 클라우드 실패 시 로컬 폴백
                 used = {"provider": "local", "model": stt.active_model(), "engine": stt._engine(stt.active_model()), "fallback": True}
         else:
@@ -934,7 +1006,7 @@ def _fmt_ts(sec: float) -> str:
 @app.post("/api/audio/transcribe")
 async def audio_transcribe(audio_file: UploadFile = File(...)) -> dict:
     """업로드 음성(mp3/mp4/m4a/wav…) → 설정된 ASR로 타임스탬프 세그먼트 전사."""
-    raw = os.path.join(tempfile.gettempdir(), f"ghost_audio_{uuid.uuid4().hex}")
+    raw = _secure_tmp("ghost_audio_")
     with open(raw, "wb") as f:
         shutil.copyfileobj(audio_file.file, f)
     try:

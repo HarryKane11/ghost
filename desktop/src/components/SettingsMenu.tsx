@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines, Volume2, ChevronRight, ChevronLeft, Download, Search, Gauge, Type, Cpu, Sparkles, PanelLeftClose } from "lucide-react";
+import { X, ShieldCheck, ShieldAlert, KeyRound, History, Check, Compass, Code, Loader2, Plus, Link2, AudioLines, Volume2, ChevronRight, ChevronLeft, Download, Search, Gauge, Type, Cpu, Sparkles, PanelLeftClose, Trash2 } from "lucide-react";
 import * as api from "@/lib/api";
 import type { Spec } from "@/components/GenUI";
 import { BrandIcon, hasBrand, EntityIcon, hasEntityIcon } from "@/components/BrandIcon";
@@ -9,7 +9,7 @@ import { useT, LANGS } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Languages } from "lucide-react";
 
-// TODO: 실제 저장소 URL로 교체하세요.
+
 const GITHUB_URL = "https://github.com/HarryKane11/ghost";
 const APP_VERSION =
   (typeof window !== "undefined" && (window as { ghost?: { version?: string } }).ghost?.version) || "0.1.0";
@@ -78,10 +78,10 @@ export function SettingsMenu({
   const [gNote, setGNote] = useState("");
 
   const loadConnectors = () => {
-    api.getConnectors().then(setConnectors);
-    api.getTools().then(setTools);
-    api.getConnectorRegistry().then((r) => setRegistry(r.connectors));
-    api.getConnectorIndex().then(setConnIndex);
+    api.getConnectors().then(setConnectors).catch(() => {});
+    api.getTools().then(setTools).catch(() => {});
+    api.getConnectorRegistry().then((r) => setRegistry(r.connectors)).catch(() => {});
+    api.getConnectorIndex().then(setConnIndex).catch(() => {});
   };
   const doIndex = async (name: string) => {
     setIndexing(name);
@@ -107,12 +107,37 @@ export function SettingsMenu({
   const addTerm = async () => {
     const term = gTerm.trim();
     if (!term) return;
-    const next = [...glossary, { term, note: gNote.trim() }];
+    // 중복 용어는 노트만 갱신(같은 용어가 줄줄이 쌓이던 문제).
+    const next = glossary.some((g) => g.term === term)
+      ? glossary.map((g) => (g.term === term ? { term, note: gNote.trim() || g.note } : g))
+      : [...glossary, { term, note: gNote.trim() }];
     setGlossaryState(await api.setGlossary(next));
     setGTerm(""); setGNote("");
   };
   const removeTerm = async (i: number) => {
     setGlossaryState(await api.setGlossary(glossary.filter((_, idx) => idx !== i)));
+  };
+  // 용어집 내보내기/가져오기 — 팀 온보딩·기기 이전용 JSON.
+  const exportGlossary = () => {
+    const blob = new Blob([JSON.stringify(glossary, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "ghost-glossary.json";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+  const importGlossary = async (file?: File | null) => {
+    if (!file) return;
+    try {
+      const items = JSON.parse(await file.text());
+      if (!Array.isArray(items)) throw new Error("형식 오류");
+      const merged = [...glossary];
+      for (const it of items) {
+        const term = String(it?.term || "").trim();
+        if (term && !merged.some((g) => g.term === term)) merged.push({ term, note: String(it?.note || "").trim() });
+      }
+      setGlossaryState(await api.setGlossary(merged));
+    } catch { alert(t("settings.glossaryImportFail")); }
   };
 
   const pickLocalModel = async (id: string) => {
@@ -139,9 +164,11 @@ export function SettingsMenu({
   useEffect(() => {
     if (!open || engineInstall.state !== "installing") return;
     const id = setInterval(async () => {
-      const s = await api.getEngineInstall();
-      setEngineInstall(s);
-      if (s.state === "done" || s.state === "error") { clearInterval(id); if (s.state === "done") refreshSttState(); }
+      try {
+        const s = await api.getEngineInstall();
+        setEngineInstall(s);
+        if (s.state === "done" || s.state === "error") { clearInterval(id); if (s.state === "done") refreshSttState(); }
+      } catch { /* 일시 네트워크 오류 — 다음 폴링에서 재시도 */ }
     }, 2500);
     return () => clearInterval(id);
   }, [open, engineInstall.state]);
@@ -149,7 +176,7 @@ export function SettingsMenu({
   // 모델 다운로드 중이면 진행률 폴링.
   useEffect(() => {
     if (!open || sttModel?.state !== "downloading") return;
-    const id = setInterval(() => api.getSttModel().then(setSttModel), 1500);
+    const id = setInterval(() => api.getSttModel().then(setSttModel).catch(() => {}), 1500);
     return () => clearInterval(id);
   }, [open, sttModel?.state]);
 
@@ -168,7 +195,14 @@ export function SettingsMenu({
     loadConnectors();
     if (!r.ok) alert(r.error || r.message || t("settings.connFail"));
   };
-  const disconnect = async (name: string) => { setBusy(name); await api.removeConnector(name); setBusy(null); loadConnectors(); };
+  const disconnect = async (name: string) => {
+    setBusy(name);
+    await api.removeConnector(name);
+    setBusy(null);
+    // 끊은 커넥터의 지형 인덱스 캐시도 함께 비워 stale 표시를 막는다.
+    setConnIndex((m) => { const n = { ...m }; delete n[name]; return n; });
+    loadConnectors();
+  };
   const addCustom = async () => {
     const n = customName.trim(), u = customUrl.trim();
     if (!n || !u) return;
@@ -664,6 +698,16 @@ export function SettingsMenu({
               className="h-9 min-w-0 flex-1 rounded-lg border border-hairline bg-surface-soft px-2.5 text-[12.5px] outline-none focus:border-ink/40" />
             <button onClick={addTerm} disabled={!gTerm.trim()} className="h-9 shrink-0 rounded-lg bg-ink px-3 text-[12.5px] font-medium text-canvas disabled:opacity-40"><Plus className="size-3.5" /></button>
           </div>
+          {/* 내보내기/가져오기 — 팀 온보딩(용어집 공유)·기기 이전 */}
+          <div className="mt-2 flex items-center gap-2">
+            <button onClick={exportGlossary} disabled={!glossary.length}
+              className="h-7 rounded-lg border border-hairline px-2.5 text-[11.5px] text-steel hover:text-foreground disabled:opacity-40">{t("settings.glossaryExport")}</button>
+            <label className="h-7 cursor-pointer rounded-lg border border-hairline px-2.5 text-[11.5px] leading-7 text-steel hover:text-foreground">
+              {t("settings.glossaryImport")}
+              <input type="file" accept="application/json,.json" className="hidden"
+                onChange={(e) => { importGlossary(e.target.files?.[0]); e.target.value = ""; }} />
+            </label>
+          </div>
         </Section>
 
         </Grp>
@@ -694,15 +738,27 @@ export function SettingsMenu({
                     blocks: [{ type: "text", text: full?.summary || t("settings.meetingNoMinutes") }] };
                   onOpenMeeting(m.title, spec as Spec); onClose();
                 };
+                // 회의 영구 삭제 — 프라이버시 기본 권리(확인 다이얼로그 1회).
+                const removeMeeting = async (m: api.MeetingMeta) => {
+                  if (!window.confirm(t("settings.deleteConfirm", { title: m.title }))) return;
+                  const ok = await api.deleteMeeting(m.id);
+                  if (ok) setMeetings((arr) => arr.filter((x) => x.id !== m.id));
+                  else alert(t("settings.deleteFail"));
+                };
                 return folders.map((f) => (
                   <div key={f || "__none__"} className="space-y-1">
                     <div className="px-1 text-[11px] font-medium text-stone">{f || t("settings.folderNone")}</div>
                     {groups[f].map((m) => (
-                      <button key={m.id} onClick={() => openMeeting(m)}
-                        className="flex w-full items-center justify-between gap-2 rounded-lg border border-hairline px-3 py-2 text-left text-[13px] hover:bg-surface-soft">
-                        <span className="truncate">{m.title}</span>
-                        <span className="shrink-0 text-[11px] text-stone">{fmtDur(m.duration_sec) && `${fmtDur(m.duration_sec)} · `}{m.has_minutes ? t("settings.open") : `${m.utterance_count ?? 0}`}</span>
-                      </button>
+                      <div key={m.id} className="group flex w-full items-center gap-2 rounded-lg border border-hairline px-3 py-2 text-[13px] hover:bg-surface-soft">
+                        <button onClick={() => openMeeting(m)} className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left">
+                          <span className="truncate">{m.title}</span>
+                          <span className="shrink-0 text-[11px] text-stone">{fmtDur(m.duration_sec) && `${fmtDur(m.duration_sec)} · `}{m.has_minutes ? t("settings.open") : `${m.utterance_count ?? 0}`}</span>
+                        </button>
+                        <button onClick={() => removeMeeting(m)} title={t("settings.deleteMeeting")}
+                          className="shrink-0 text-stone opacity-0 transition-opacity hover:text-[#b04141] group-hover:opacity-100">
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 ));

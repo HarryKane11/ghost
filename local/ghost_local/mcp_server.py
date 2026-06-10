@@ -13,8 +13,10 @@ Ghost가 저장한 회의록 전체(~/Ghost/meetings/)에 접근한다. 현재 �
   get_transcript(id)          전사 평문
   get_summary(id)             롤링 요약(요약·결정·액션·미해결·용어·수치)
   current_meeting()           가장 최근(진행 중일 가능성) 회의
+  append_note(id, text)       회의에 메모 남기기 (notes.jsonl append — 전사·회의록은 불변)
 
-읽기 전용 — 회의 데이터를 수정하지 않는다(R4: brain이 이걸 다시 호출해도 부작용 없음).
+전사·회의록·요약은 읽기 전용. 유일한 쓰기는 append_note로, 별도 notes.jsonl에만
+누적되므로 brain이 이 MCP를 다시 호출해도 회의 원본 데이터엔 부작용이 없다.
 """
 
 from __future__ import annotations
@@ -60,6 +62,13 @@ def get_summary(meeting_id: str) -> Dict[str, Any]:
         return {}
     keys = ("summary", "decisions", "action_items", "open_questions", "glossary", "key_numbers")
     return {k: meta.get(k) for k in keys}
+
+
+@mcp.tool()
+def append_note(meeting_id: str, text: str, author: str = "agent") -> bool:
+    """회의에 메모를 남긴다(예: 후속 메일 발송됨, 티켓 ID 연결). 전사·회의록은 수정하지 않고
+    notes.jsonl에만 누적된다. get_meeting 결과의 notes 필드로 함께 조회된다."""
+    return store.append_note(meeting_id, text, author=author)
 
 
 @mcp.tool()

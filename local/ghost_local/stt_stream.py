@@ -64,10 +64,21 @@ class StreamSession:
             except Exception:  # noqa: BLE001
                 pass
 
+    # 디코더가 따라오지 못할 때 큐가 무한 성장하지 않게(메모리 보호). 16k float32 기준
+    # 2048샘플/청크 → 400청크 ≈ 51초 분량이 상한. 넘치면 가장 오래된 청크를 버린다
+    # (라이브 '초안' 경로라 잠깐의 드롭은 품질만 살짝 떨어질 뿐, 최종 배치 전사는 무손실).
+    _MAX_QUEUE = 400
+
     def feed(self, samples) -> None:
         """16kHz mono float32 numpy 배열을 투입."""
-        if self._alive:
-            self._q.put(samples)
+        if not self._alive:
+            return
+        while self._q.qsize() >= self._MAX_QUEUE:
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                break
+        self._q.put(samples)
 
     def finalize(self) -> None:
         if self._alive:

@@ -1,5 +1,6 @@
 const { app, BrowserWindow, session, shell, desktopCapturer, Tray, Menu, globalShortcut, nativeImage, ipcMain, screen } = require("electron");
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -7,6 +8,10 @@ const http = require("node:http");
 
 const BACKEND_PORT = 8765;
 const TOGGLE_SHORTCUT = "CommandOrControl+Shift+G";
+// API 토큰: 앱이 발급해 백엔드(env)와 렌더러(preload argv)에 같이 꽂는다.
+// 브라우저의 임의 사이트가 localhost:8765로 회의 전사를 읽어가는 것을 차단.
+// 개발 모드(수동 uvicorn)는 백엔드에 GHOST_TOKEN이 없으므로 인증이 강제되지 않는다.
+const GHOST_TOKEN = crypto.randomBytes(24).toString("hex");
 let backendProc = null;
 let win = null;
 let tray = null;
@@ -46,6 +51,7 @@ function backendEnv() {
   env.PATH = [...dirs, env.PATH || ""].join(path.delimiter);
   env.GHOST_BUILD = expectedBuild();   // /api/health가 echo → '내 백엔드' 식별
   env.GHOST_PORT = String(BACKEND_PORT);
+  if (app.isPackaged) env.GHOST_TOKEN = GHOST_TOKEN;   // 패키징 앱만 API 토큰 강제(dev는 자유)
   try { env.GHOST_CONFIG_DIR = app.getPath("userData"); } catch { /* ignore */ }   // 쓰기 가능 .env 위치
   return env;
 }
@@ -145,15 +151,15 @@ function resolveBackendDir() {
   const src = path.join(process.resourcesPath, "backend");
   const dst = path.join(app.getPath("userData"), "backend");
   try {
-    // 갱신 판단: uv.lock(의존성) 또는 server.py(코드)가 번들 쪽이 더 새것이면 다시 복사.
-    // (같은 버전으로 재빌드해 lock은 그대로지만 .py만 바뀐 경우도 갱신되게 server.py도 본다.)
-    const newer = (name) => {
-      const s = path.join(src, name), dd = path.join(dst, name);
-      return fs.existsSync(s) && (!fs.existsSync(dd) || fs.statSync(s).mtimeMs > fs.statSync(dd).mtimeMs);
-    };
-    const needCopy = !fs.existsSync(path.join(dst, "uv.lock")) || newer("uv.lock") || newer("server.py");
-    if (needCopy) {
+    // 갱신 판단: 앱 버전 마커로 본다. 이전의 mtime 비교(uv.lock·server.py)는
+    // ghost_local/*.py만 바뀐 릴리즈에서 복사를 건너뛰어 구버전 백엔드가 계속 돌았다.
+    const marker = path.join(dst, ".ghost-build");
+    const cur = expectedBuild();
+    let prev = "";
+    try { prev = fs.readFileSync(marker, "utf8").trim(); } catch { /* first run */ }
+    if (prev !== cur || !fs.existsSync(path.join(dst, "uv.lock"))) {
       fs.cpSync(src, dst, { recursive: true });   // .venv는 src에 없어 보존됨(코드만 갱신)
+      fs.writeFileSync(marker, cur);
     }
   } catch (e) {
     console.error("[backend] copy failed:", e.message);
@@ -205,6 +211,7 @@ async function createWindow() {
       nodeIntegration: false,
       // 오브 모드에서 창을 숨겨도 렌더러의 오디오 캡처·전사 루프가 멈추지 않게.
       backgroundThrottling: false,
+      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`],
     },
   });
   win.once("ready-to-show", () => win.show());
@@ -257,6 +264,7 @@ async function createOrbWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
+      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`],
     },
   });
   orb.setAlwaysOnTop(true, "floating");
@@ -289,6 +297,20 @@ ipcMain.on("ghost:orb-bubble", (_e, text) => {
 });
 ipcMain.on("ghost:orb-state", (_e, state) => {
   orb?.webContents.send("ghost:orb-state", state);
+});
+
+// macOS 개인정보 설정 딥링크 — 마이크/화면기록 권한이 거부된 사용자를 바로 설정으로 보낸다.
+ipcMain.on("ghost:open-privacy", (_e, pane) => {
+  const PANES = {
+    microphone: "Privacy_Microphone",
+    screen: "Privacy_ScreenCapture",
+  };
+  const p = PANES[pane] || PANES.microphone;
+  if (process.platform === "darwin") {
+    shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${p}`);
+  } else if (process.platform === "win32") {
+    shell.openExternal("ms-settings:privacy-microphone");
+  }
 });
 
 // 디스플레이 모드별 창 크기/always-on-top. assist=컴팩트 플로팅, full/interview=넓게.

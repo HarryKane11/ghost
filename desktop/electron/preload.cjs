@@ -3,11 +3,17 @@ const { contextBridge, ipcRenderer } = require("electron");
 let version = "0.1.0";
 try { version = require("../package.json").version || version; } catch { /* ignore */ }
 
+// 메인 프로세스가 발급한 API 토큰(--ghost-token=...) — 렌더러가 모든 백엔드 요청에 동봉.
+const token = (process.argv.find((a) => a.startsWith("--ghost-token=")) || "").split("=")[1] || "";
+
 // 렌더러는 백엔드를 HTTP(localhost:8765)로 직접 호출하므로 별도 브리지는 최소화.
 contextBridge.exposeInMainWorld("ghost", {
   platform: process.platform,
   isElectron: true,
   version,
+  token,
+  // macOS 개인정보 설정 열기 ("microphone" | "screen") — 권한 거부 사용자 구제.
+  openPrivacy: (pane) => ipcRenderer.send("ghost:open-privacy", pane),
   // 트레이/전역 단축키에서 청취 토글 요청 → 렌더러 구독. 해제 함수 반환.
   onToggleListen: (cb) => {
     const h = () => cb();
