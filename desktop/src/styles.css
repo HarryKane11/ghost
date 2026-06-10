@@ -335,3 +335,19 @@ body.split-dragging iframe {
   from { opacity: 0; transform: translateY(6px) scale(0.92); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+/* ── 스트리밍 로더 트레일 — 날아가는 유령(phantom-fly)과 같은 주기·선형으로 따라가는 빛 꼬리 ── */
+@keyframes ghost-stream-trail {
+  0%   { left: -30%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+.ghost-stream-trail {
+  background: linear-gradient(90deg,
+    transparent,
+    color-mix(in srgb, var(--spark) 14%, transparent) 60%,
+    color-mix(in srgb, var(--spark) 26%, transparent));
+  animation: ghost-stream-trail 2.8s linear infinite;
+  will-change: left, opacity;
+}
