@@ -45,6 +45,7 @@ export function AudioView({
 
   const fileRef = useRef<HTMLInputElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const abortRef = useRef<(() => void) | null>(null);   // 진행 중 업로드 취소 핸들
 
   const DRAG = { WebkitAppRegion: "drag" } as any;
   const NODRAG = { WebkitAppRegion: "no-drag" } as any;
@@ -64,14 +65,20 @@ export function AudioView({
     setSegments([]); setMinutes(null); setErr(""); setUpPct(0);
     setPhase("transcribing");
     try {
-      const r = await api.uploadAudio(file, setUpPct);
+      const r = await api.uploadAudio(file, setUpPct, (abort) => { abortRef.current = abort; });
       if (!r.ok || !r.segments?.length) { setPhase("error"); setErr(t("audio.noText")); return; }
       setSegments(r.segments);
       setPhase("ready");
     } catch (e) {
+      // 사용자가 직접 취소했으면 에러가 아니라 빈 상태로 복귀.
+      if (String(e).includes("aborted")) { setPhase("empty"); setFileName(""); return; }
       setPhase("error"); setErr(String(e));
+    } finally {
+      abortRef.current = null;
     }
   };
+
+  const cancelUpload = () => { abortRef.current?.(); };
 
   const genMinutes = () => {
     if (!segments.length || minBusy) return;
@@ -132,6 +139,11 @@ export function AudioView({
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-stone">
           <Loader2 className="size-7 animate-spin text-spark-deep" />
           <p className="text-[13px]">{upPct < 100 ? `${t("audio.uploading")} ${upPct}%` : t("audio.transcribing")}</p>
+          {upPct < 100 && (
+            <button onClick={cancelUpload} className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-steel hover:text-foreground">
+              {t("audio.cancel")}
+            </button>
+          )}
         </div>
       ) : phase === "error" ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-stone">

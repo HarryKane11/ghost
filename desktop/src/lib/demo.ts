@@ -1,6 +1,7 @@
 import type { Spec } from "@/components/GenUI";
 
-/** 데모 회의 — 백엔드 없이 Ghost의 동작(전사 → 능동 카드)을 체험시키는 스크립트. */
+/** 데모 회의 — 백엔드 없이 Ghost의 동작(전사 → 능동 카드)을 체험시키는 스크립트.
+ * UI 언어에 맞춰 한국어/영어 버전을 고른다(getDemo). */
 
 export const DEMO_TRANSCRIPT: string[] = [
   "자, 이번 분기 국내 SaaS 시장 얘기부터 해볼까요?",
@@ -53,3 +54,63 @@ export const DEMO_CARDS: { afterLine: number; query: string; ack: string; spec: 
     },
   },
 ];
+
+// ── English demo (UI 언어 en/zh일 때) ────────────────────────────────────────
+export const DEMO_TRANSCRIPT_EN: string[] = [
+  "Alright, let's start with the SaaS market for this quarter.",
+  "I heard growth was higher than expected — what was the exact number?",
+  "Also, does anyone remember what we decided on pricing last meeting?",
+  "It'd be good to double-check the Pro tier price.",
+];
+
+export const DEMO_CARDS_EN: { afterLine: number; query: string; ack: string; spec: Spec }[] = [
+  {
+    afterLine: 1,
+    query: "SaaS market growth rate",
+    ack: "Sure, let me pull the latest numbers.",
+    spec: {
+      title: "SaaS market growth",
+      spoken: "The SaaS market grew about 18.5% year over year, reaching an estimated $2.1B.",
+      intent: "web_search",
+      blocks: [
+        { type: "stat", label: "YoY growth", value: "+18.5%" },
+        { type: "stat", label: "Market size (est.)", value: "$2.1B" },
+        { type: "text", text: "Cloud migration and AI adoption are driving growth, with mid-market adoption rising fastest." },
+        { type: "accordion", label: "Key drivers", items: [
+          "Cloud migration | On-prem → SaaS transitions accelerating, especially in collaboration & CRM.",
+          "AI adoption | Products with generative AI features show ~1.6x ARPU vs. those without.",
+        ] },
+        { type: "list", items: ["Source: Industry research institute (2 days ago)", "Source: 2025 SaaS market report"] },
+        { type: "actions", items: [
+          "Compare competitor share",
+          "Growth drivers in depth | Analyze the SaaS market growth drivers in detail",
+          "3-year outlook | SaaS market outlook for the next 3 years",
+        ] },
+      ],
+    },
+  },
+  {
+    afterLine: 3,
+    query: "Last meeting's pricing decision",
+    ack: "Let me check the previous meeting notes.",
+    spec: {
+      title: "Prior decision: pricing",
+      spoken: "Last meeting we locked the Pro tier at $29 per seat per month, with on-prem going to custom quotes.",
+      intent: "internal_rag",
+      blocks: [
+        { type: "heading", text: "Decisions from the Apr 22 product meeting" },
+        { type: "table", items: ["Tier | Price | Target", "Team | $19/seat·mo | Small teams", "Pro | $29/seat·mo | General business", "Enterprise | Custom quote | On-prem & security"] },
+        { type: "checklist", items: ["Update pricing page for Pro tier", "Share new rates with sales", "Refresh on-prem quote template"] },
+        { type: "list", items: ["Source: Notion · Product meeting notes (4/22)"] },
+        { type: "actions", items: ["Draft follow-up email | Draft an email to sales sharing the finalized pricing"] },
+      ],
+    },
+  },
+];
+
+/** UI 언어에 맞는 데모 세트. ko면 한국어, 그 외엔 영어. */
+export function getDemo(lang: string): { transcript: string[]; cards: typeof DEMO_CARDS } {
+  return lang === "ko"
+    ? { transcript: DEMO_TRANSCRIPT, cards: DEMO_CARDS }
+    : { transcript: DEMO_TRANSCRIPT_EN, cards: DEMO_CARDS_EN };
+}

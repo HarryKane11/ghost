@@ -17,8 +17,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-// TODO: 실제 저장소 URL로 교체하세요.
-const GITHUB_URL = "https://github.com/ghost-app/ghost";
+
+const GITHUB_URL = "https://github.com/HarryKane11/ghost";
 
 const FEATURES = [
   {

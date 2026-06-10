@@ -56,6 +56,7 @@ class OpenCodeAdapter(AgentAdapter):
         cmd.append(prompt)
 
         final_text = ""
+        proc = None
         try:
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.DEVNULL, text=True, bufsize=1)
@@ -84,6 +85,13 @@ class OpenCodeAdapter(AgentAdapter):
                               "blocks": [{"type": "callout", "value": "error",
                                           "text": f"OpenCode 실행 실패: {ex}"}]})
             return
+        finally:
+            # 클라이언트 중단/타임아웃으로 제너레이터가 버려져도 좀비 프로세스를 남기지 않는다.
+            if proc is not None and proc.poll() is None:
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
         spec = brain._extract_json(final_text)
         fallback = final_text.strip() if (final_text and not final_text.lstrip().startswith("{")) else query
         yield ("result", brain._normalize_spec(spec, fallback_text=fallback))

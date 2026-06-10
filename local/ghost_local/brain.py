@@ -250,15 +250,31 @@ def _tools_line(cfg: "BrainConfig") -> str:
 
 # ── 유틸 ────────────────────────────────────────────────────────────────────
 def _extract_json(text: str) -> Optional[dict]:
-    """모델 출력에서 첫 번째 균형 잡힌 JSON 객체를 추출."""
+    """모델 출력에서 첫 번째 균형 잡힌 JSON 객체를 추출.
+
+    문자열 리터럴 내부의 중괄호/이스케이프를 인식한다 — 응답에 코드 조각
+    (`"code": "if (x) { ... }"`)이 있어도 brace 매칭이 어긋나지 않는다.
+    """
     if not text:
         return None
     start = text.find("{")
     while start != -1:
         depth = 0
+        in_str = False
+        esc = False
         for i in range(start, len(text)):
             c = text[i]
-            if c == "{":
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
                 depth += 1
             elif c == "}":
                 depth -= 1
@@ -328,10 +344,14 @@ def _codex_text(system: str, user: str, model: Optional[str] = None, timeout: in
     try:
         raw, err = _once()
         # 토큰 레이스("refresh token already consumed")는 동시 codex 호출 시 드물게 발생 →
-        # 잠깐 뒤 재시도하면 갱신된 토큰으로 성공. (직렬화 락 대신 retry로 처리해 병목 제거.)
-        if not raw.strip() and _is_token_race(err):
-            time.sleep(1.2)
-            raw, _ = _once()
+        # 잠깐 뒤 재시도하면 갱신된 토큰으로 성공. 동시 호출이 겹쳐도 한꺼번에 재충돌하지 않게
+        # 지터를 섞은 백오프로 최대 2회. (직렬화 락 대신 retry로 처리해 병목 제거.)
+        attempt = 0
+        while not raw.strip() and _is_token_race(err) and attempt < 2:
+            import random
+            time.sleep(0.8 * (attempt + 1) + random.uniform(0, 0.6))
+            raw, err = _once()
+            attempt += 1
     except Exception:
         raw = ""
     finally:

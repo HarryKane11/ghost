@@ -168,7 +168,18 @@ export function Onboarding({
                     <button onClick={grantMic} className="h-8 shrink-0 rounded-lg bg-ink px-3 text-[12.5px] font-medium text-canvas">{t("ob.allow")}</button>
                   )}
                 </div>
-                {micErr && <p className="mt-2 text-[12px] leading-relaxed text-[#b04141]">{micErr}</p>}
+                {micErr && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <p className="min-w-0 flex-1 text-[12px] leading-relaxed text-[#b04141]">{micErr}</p>
+                    {/* 한 번 거부하면 OS가 다시 묻지 않는다 → 시스템 설정으로 바로 보낸다 */}
+                    {!!(window as any).ghost?.openPrivacy && (
+                      <button onClick={() => (window as any).ghost.openPrivacy("microphone")}
+                        className="h-7 shrink-0 rounded-lg border border-hairline px-2.5 text-[11.5px] font-medium text-steel hover:text-foreground">
+                        {t("ob.openSettings")}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="mt-3 flex items-start gap-3 rounded-xl border border-hairline p-4">

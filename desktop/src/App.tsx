@@ -21,7 +21,7 @@ import { PhantomGhost, PhantomField } from "@/components/Phantom";
 import { cn } from "@/lib/cn";
 import * as api from "@/lib/api";
 import { useListening, type Source } from "@/lib/useListening";
-import { DEMO_TRANSCRIPT, DEMO_CARDS } from "@/lib/demo";
+import { getDemo } from "@/lib/demo";
 import { LangProvider, makeT, useT, type Lang } from "@/lib/i18n";
 
 type CardItem = {
@@ -874,13 +874,14 @@ export default function App() {
     setTranscript([]); transcriptRef.current = [];
     setFeed([]); historyRef.current = [];
     setDemoOn(true);
+    const demo = getDemo(lang);   // UI 언어에 맞는 데모(영문 UI에 한국어 데모가 나오던 문제 해결)
     const timers = demoTimersRef.current;
     let delay = 500;
-    DEMO_TRANSCRIPT.forEach((line, i) => {
+    demo.transcript.forEach((line, i) => {
       timers.push(setTimeout(() => {
         transcriptRef.current = [...transcriptRef.current, line];
         setTranscript((arr) => [...arr, { id: newId(), text: line }]);
-        DEMO_CARDS.filter((c) => c.afterLine === i).forEach((c) => {
+        demo.cards.filter((c) => c.afterLine === i).forEach((c) => {
           const id = newId();
           timers.push(setTimeout(() => setFeed((f) => [...f, { kind: "card", id, query: c.query, ack: c.ack, status: "working", progress: [{ text: t("trans.listening") }] }]), 400));
           timers.push(setTimeout(() => updateCard(id, { status: "done", spec: c.spec, backend: "데모" }), 1700));
@@ -889,7 +890,7 @@ export default function App() {
       delay += 1500;
     });
     timers.push(setTimeout(() => setDemoOn(false), delay + 1800));
-  }, [active, stopDemo, updateCard, t]);
+  }, [active, stopDemo, updateCard, t, lang]);
 
   // 단축키
   useEffect(() => {
