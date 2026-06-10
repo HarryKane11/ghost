@@ -10,6 +10,49 @@ import { cn } from "@/lib/cn";
 import { Languages } from "lucide-react";
 
 
+/** 셋업 닥터 — 첫 전사까지 가는 길의 막힌 곳을 한눈에. 온보딩 이탈을 줄인다. */
+function SetupDoctor({ status, t }: { status: api.Status | null; t: (k: string) => string }) {
+  const [mic, setMic] = useState<string>("unknown");
+  useEffect(() => {
+    try {
+      (navigator.permissions?.query({ name: "microphone" as PermissionName }))
+        ?.then((p) => setMic(p.state)).catch(() => setMic("unknown"));
+    } catch { setMic("unknown"); }
+  }, []);
+  const brainOk = status?.backend === "codex" ? !!status?.codex_logged_in
+    : status?.backend === "openai" ? !!status?.openai_key : !!status;
+  const rows: { ok: boolean; warn?: boolean; label: string; hint: string }[] = [
+    { ok: !!status, label: t("doctor.backend"), hint: status ? t("doctor.ok") : t("doctor.backendHint") },
+    { ok: brainOk, label: `${t("doctor.brain")} (${status?.backend || "?"})`, hint: brainOk ? t("doctor.ok") : t("doctor.brainHint") },
+    { ok: !!status?.stt_ready, label: t("doctor.stt"), hint: status?.stt_ready ? t("doctor.ok") : (status?.stt_error || t("doctor.sttHint")) },
+    { ok: mic === "granted", warn: mic !== "denied", label: t("doctor.mic"), hint: mic === "granted" ? t("doctor.ok") : mic === "denied" ? t("doctor.micDenied") : t("doctor.micUnknown") },
+  ];
+  return (
+    <div className="mb-4 rounded-xl border border-hairline p-3.5">
+      <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold tracking-tight">
+        <ShieldCheck className="size-4 text-steel" />{t("doctor.title")}
+      </div>
+      <div className="space-y-1.5">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2 text-[12.5px]">
+            {r.ok
+              ? <Check className="size-3.5 shrink-0 text-spark-deep" />
+              : r.warn
+                ? <span className="grid size-3.5 shrink-0 place-items-center text-[#b06a00]">—</span>
+                : <X className="size-3.5 shrink-0 text-[#b04141]" />}
+            <span className="shrink-0 font-medium text-charcoal">{r.label}</span>
+            <span className="min-w-0 truncate text-stone" title={r.hint}>{r.hint}</span>
+            {r.label === t("doctor.mic") && mic === "denied" && !!(window as any).ghost?.openPrivacy && (
+              <button onClick={() => (window as any).ghost.openPrivacy("microphone")}
+                className="ml-auto shrink-0 rounded-md border border-hairline px-2 py-0.5 text-[11px] text-steel hover:text-foreground">{t("ob.openSettings")}</button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const GITHUB_URL = "https://github.com/HarryKane11/ghost";
 const APP_VERSION =
   (typeof window !== "undefined" && (window as { ghost?: { version?: string } }).ghost?.version) || "0.1.0";
@@ -325,6 +368,7 @@ export function SettingsMenu({
         })()}
 
         {/* 관리자 전용: 사용량·비용 대시보드 */}
+        {page && <SetupDoctor status={status} t={t} />}
         {page && <UsageDashboard t={t} />}
         </Grp>
         <Grp id="appearance">
@@ -406,7 +450,11 @@ export function SettingsMenu({
           <div className="flex items-center gap-1.5">
             {[{ id: "local", label: t("settings.sttLocal") }, { id: "elevenlabs", label: t("settings.sttCloud") }].map((p) => (
               <button key={p.id}
-                onClick={async () => { const s = await api.setSttProvider(p.id); onStatus?.(s); }}
+                onClick={async () => {
+                  // 전환 실패(백엔드 다운 등) 시 조용히 잘못된 상태로 보이지 않게 피드백.
+                  try { const s = await api.setSttProvider(p.id); onStatus?.(s); }
+                  catch { alert(t("settings.sttSwitchFail")); }
+                }}
                 className={`h-8 flex-1 rounded-lg border text-[12px] font-medium transition-colors ${status?.stt_provider === p.id ? "border-ink bg-ink text-canvas" : "border-hairline text-steel hover:text-foreground"}`}>
                 {p.label}
               </button>
@@ -564,7 +612,7 @@ export function SettingsMenu({
                     ? <span className="inline-flex items-center gap-1 text-[11px] text-stone"><Loader2 className="size-3.5 animate-spin" /> {t("settings.indexing")}</span>
                     : <button onClick={() => doIndex(c.name)} title={connIndex[c.name] ? `${t("settings.indexed")} · ${connIndex[c.name].indexed_at?.slice(0, 10)}` : t("settings.indexHint")}
                         className={cn("rounded-md border border-hairline px-2 py-1 text-[11px]", connIndex[c.name] ? "text-spark-deep" : "text-steel hover:text-foreground")}>
-                        {connIndex[c.name] ? `✓ ${t("settings.indexBtn")}` : t("settings.indexBtn")}
+                        {connIndex[c.name] ? `✓ ${t("settings.reindexBtn")}` : t("settings.indexBtn")}
                       </button>
                 )}
                 {busy === c.name ? (

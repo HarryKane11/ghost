@@ -30,8 +30,16 @@ export function Onboarding({
   const [micOk, setMicOk] = useState(false);
   const [micErr, setMicErr] = useState<string | null>(null);
 
-  // 열릴 때마다 첫 화면부터. (status는 부모가 폴링)
-  useEffect(() => { if (open) { setStep(0); setMicErr(null); } }, [open]);
+  // 닫았다 다시 열어도 진행하던 단계에서 이어간다(이전: 매번 처음으로 리셋). (status는 부모가 폴링)
+  useEffect(() => {
+    if (!open) return;
+    try { setStep(Math.min(3, Math.max(0, parseInt(sessionStorage.getItem("ghost.obStep") || "0", 10) || 0))); }
+    catch { setStep(0); }
+    setMicErr(null);
+  }, [open]);
+  useEffect(() => {
+    try { sessionStorage.setItem("ghost.obStep", String(step)); } catch { /* ignore */ }
+  }, [step]);
 
   const backend = status?.backend ?? "openai";
   const brainReady = backend === "codex" ? !!status?.codex_logged_in : !!status?.openai_key;

@@ -1,4 +1,5 @@
-import { Radio, MonitorPlay, FileAudio, ArrowRight, Settings, HelpCircle } from "lucide-react";
+import { useState } from "react";
+import { Radio, MonitorPlay, FileAudio, ArrowRight, Settings, HelpCircle, Loader2 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 
 export type LaunchMode = "live" | "watch" | "audio";
@@ -7,6 +8,14 @@ export type LaunchMode = "live" | "watch" | "audio";
 export function Launcher({ onSelect, onSettings, onHelp, isMac = false, t }: { onSelect: (m: LaunchMode) => void; onSettings?: () => void; onHelp?: () => void; isMac?: boolean; t: (k: string) => string }) {
   const DRAG = { WebkitAppRegion: "drag" } as any;
   const NODRAG = { WebkitAppRegion: "no-drag" } as any;
+  // 클릭 직후 짧은 로딩 표시 — 백엔드가 늦게 뜰 때 중복 클릭/멈춘 느낌 방지.
+  const [picked, setPicked] = useState<LaunchMode | null>(null);
+  const choose = (m: LaunchMode) => {
+    if (picked) return;
+    setPicked(m);
+    onSelect(m);
+    setTimeout(() => setPicked(null), 2000);   // 모드 전환이 즉시면 안 보이고, 늦으면 스피너가 남는다
+  };
 
   const cards: { mode: LaunchMode; icon: React.ReactNode; title: string; desc: string }[] = [
     { mode: "live", icon: <Radio className="size-6" />, title: t("launch.liveTitle"), desc: t("launch.liveDesc") },
@@ -30,15 +39,15 @@ export function Launcher({ onSelect, onSettings, onHelp, isMac = false, t }: { o
         </div>
         <div className="grid w-full max-w-3xl gap-3 sm:grid-cols-3">
           {cards.map((c) => (
-            <button key={c.mode} onClick={() => onSelect(c.mode)}
-              className="group flex flex-col gap-3 rounded-2xl border border-hairline bg-surface-soft/40 p-5 text-left transition-all hover:border-ink/30 hover:bg-surface hover:shadow-sm">
+            <button key={c.mode} onClick={() => choose(c.mode)} disabled={!!picked}
+              className="group flex flex-col gap-3 rounded-2xl border border-hairline bg-surface-soft/40 p-5 text-left transition-all hover:border-ink/30 hover:bg-surface hover:shadow-sm disabled:opacity-60">
               <span className="grid size-11 place-items-center rounded-xl bg-canvas text-spark-deep shadow-sm">{c.icon}</span>
               <div className="flex-1">
                 <div className="text-[14.5px] font-semibold text-foreground">{c.title}</div>
                 <p className="mt-1 text-[12px] leading-relaxed text-stone">{c.desc}</p>
               </div>
               <span className="inline-flex items-center gap-1 text-[12px] font-medium text-steel transition-colors group-hover:text-foreground">
-                {t("launch.start")} <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+                {picked === c.mode ? <><Loader2 className="size-3.5 animate-spin" /> {t("launch.starting")}</> : <>{t("launch.start")} <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" /></>}
               </span>
             </button>
           ))}

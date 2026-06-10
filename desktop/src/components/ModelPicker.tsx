@@ -22,7 +22,8 @@ export function ModelPicker({
 
   return (
     <span className="relative">
-      <button onClick={() => setOpen((v) => !v)} disabled={disabled} title={t("trans.pickModel")}
+      <button onClick={() => setOpen((v) => !v)} disabled={disabled}
+        title={disabled ? t("trans.pickModelDisabled") : t("trans.pickModel")}
         className="flex items-center gap-1 rounded-full border border-hairline bg-surface px-2 py-0.5 text-[11px] font-medium text-steel hover:text-foreground disabled:opacity-60">
         <span className={`size-1.5 rounded-full ${fallbackColor ? "bg-[#e9a23b]" : "bg-spark"}`} />
         {label}<ChevronDown className="size-3 opacity-60" />
