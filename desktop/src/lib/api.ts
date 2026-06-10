@@ -375,7 +375,12 @@ export async function getSttStreaming(): Promise<{ available: boolean; kind?: St
   try { return await (await ghostFetch(`${BASE}/api/stt/streaming`)).json(); } catch { return { available: false }; }
 }
 export async function getSttModels(): Promise<SttModels | null> {
-  try { return await (await ghostFetch(`${BASE}/api/stt/models`)).json(); } catch { return null; }
+  try {
+    const r = await ghostFetch(`${BASE}/api/stt/models`);
+    if (!r.ok) return null;            // 401/5xx 등 — 형태 안 맞는 JSON을 흘리지 않는다
+    const j = await r.json();
+    return j && Array.isArray(j.local) && Array.isArray(j.cloud) ? j : null;
+  } catch { return null; }
 }
 // 인앱 엔진 설치 (터미널 불필요)
 export type EngineInstall = { state: "idle" | "installing" | "done" | "error"; target?: string | null; error?: string | null };
