@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import {
   Link2, Quote, ArrowUpRight, Info, TriangleAlert, CircleCheck, CircleX,
   ChevronDown, ArrowRight,
@@ -266,6 +266,41 @@ function Actions({ items }: { items: string[] }) {
   );
 }
 
+/** Mermaid 다이어그램 — 흐름도·시퀀스·간트 등. 렌더 실패 시 코드 블록으로 강등. */
+let _mermaidSeq = 0;
+function MermaidBlock({ code, label }: { code: string; label?: string }) {
+  const [svg, setSvg] = useState("");
+  const [err, setErr] = useState(false);
+  const idRef = useRef(`ghost-mmd-${++_mermaidSeq}`);
+  // 모델이 ```mermaid 펜스를 섞어 보내도 안전하게 벗긴다.
+  const clean = (code || "").replace(/^\s*```(?:mermaid)?\s*/i, "").replace(/```\s*$/, "").trim();
+  useEffect(() => {
+    if (!clean) return;
+    let alive = true;
+    (async () => {
+      try {
+        const mermaid = (await import("mermaid")).default;
+        const dark = document.documentElement.classList.contains("dark");
+        mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral", securityLevel: "loose", fontFamily: "inherit" });
+        const { svg } = await mermaid.render(idRef.current, clean);
+        if (alive) { setSvg(svg); setErr(false); }
+      } catch {
+        if (alive) setErr(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, [clean]);
+  if (!clean) return null;
+  if (err) return <CodeBlock text={clean} label={label || "mermaid"} />;
+  if (!svg) return <div className="mist h-24 rounded-xl" />;
+  return (
+    <figure className="overflow-x-auto rounded-xl border border-hairline bg-surface-soft px-3 py-3 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full">
+      <div dangerouslySetInnerHTML={{ __html: svg }} />
+      {label && <figcaption className="mt-1.5 text-center text-[11px] text-stone">{label}</figcaption>}
+    </figure>
+  );
+}
+
 /** 코드 블록(모노스페이스). label=언어. */
 function CodeBlock({ text, label }: { text: string; label?: string }) {
   if (!text) return null;
@@ -436,6 +471,8 @@ function BlockView({ b }: { b: Block }) {
       return <Actions items={b.items || []} />;
     case "code":
       return <CodeBlock text={b.text || ""} label={b.label} />;
+    case "mermaid":
+      return <MermaidBlock code={b.text || ""} label={b.label} />;
     case "handwritten": {
       const ko = isKorean(b.text || "");
       return (

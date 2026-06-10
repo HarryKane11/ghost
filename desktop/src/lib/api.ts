@@ -141,7 +141,8 @@ function streamSSE(path: string, body: object, h: StreamHandlers): () => void {
         let data = "";
         for (const line of chunk.split("\n")) {
           if (line.startsWith("event:")) ev = line.slice(6).trim();
-          else if (line.startsWith("data:")) data += line.slice(5).trim();
+          // SSE 스펙: data가 여러 줄이면 \n으로 이어 붙인다(이전엔 그냥 연결돼 JSON이 깨졌다).
+          else if (line.startsWith("data:")) data += (data ? "\n" : "") + line.slice(5).replace(/^ /, "");
         }
         if (!data) continue;
         let payload: any;
@@ -302,7 +303,7 @@ export function streamTranslate(
         let ev = "message", data = "";
         for (const line of chunk.split("\n")) {
           if (line.startsWith("event:")) ev = line.slice(6).trim();
-          else if (line.startsWith("data:")) data += line.slice(5).trim();
+          else if (line.startsWith("data:")) data += (data ? "\n" : "") + line.slice(5).replace(/^ /, "");
         }
         if (!data) continue;
         let payload: { text?: string; error?: string };
@@ -315,6 +316,20 @@ export function streamTranslate(
     finish();
   })().catch((e) => { if (!ctrl.signal.aborted) h.onError?.(String(e)); finish(); });
   return () => ctrl.abort();
+}
+
+// ── 실시간 다듬기 — 문장 확정 직후 맥락·용어집 기반 교정 + 불명확 키워드 ──────
+export type UnclearTerm = { heard: string; guess?: string };
+export type PolishResult = { text: string; changed: boolean; unclear: UnclearTerm[] };
+export async function polishLine(text: string, meetingId = ""): Promise<PolishResult | null> {
+  try {
+    const r = await fetch(`${BASE}/api/polish`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, meeting_id: meetingId }),
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
 }
 
 // 전역 용어집 (Word Memory)

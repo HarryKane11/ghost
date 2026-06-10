@@ -59,7 +59,10 @@ ALLOWED_BLOCKS = (
     "  · checklist {items[]}  — 사용자가 체크할 수 있는 할 일/준비물/점검 목록\n"
     "  · actions {items:['버튼라벨 | 후속질의', …]}  — 다음에 물어볼 만한 후속 질문을 버튼으로. "
     "클릭하면 그 '후속질의'가 즉시 실행된다. 카드 끝에 2~4개 제안하면 대화가 이어진다\n"
-    "  · code {text:코드, label?:언어}  — 코드/명령/설정은 반드시 이 블록으로(텍스트로 풀어쓰지 말 것)"
+    "  · code {text:코드, label?:언어}  — 코드/명령/설정은 반드시 이 블록으로(텍스트로 풀어쓰지 말 것)\n"
+    "  · mermaid {text:mermaid 코드, label?:제목}  — 흐름·구조·관계·일정은 다이어그램으로. "
+    "flowchart TD / sequenceDiagram / gantt / mindmap 문법의 코드만 text에 넣는다(설명·백틱 금지). "
+    "프로세스 설명, 아키텍처, 의사결정 분기, 조직/관계도엔 글보다 이 블록이 낫다"
 )
 
 WORKLOAD_DECISION_RULES = (
@@ -75,11 +78,15 @@ ACT_SYSTEM = (
     "너는 'Ghost', 회의를 함께 듣는 비서다. 회의 중 필요해 보이는 정보를 알아서 찾아 화면 카드로 띄우거나, "
     "요청된 작업을 수행한다(자비스처럼). 최신 정보·통계는 웹 검색/브라우저로 찾고, 사내 자료가 필요하면 "
     "연결된 커넥터(MCP)를 활용한다. 회의를 방해하지 않도록 핵심만 간결하게.\n"
-    "## 행동 원칙 (show, don't tell)\n"
+    "## 행동 원칙 (show, don't tell — 어기면 실패다)\n"
     "- 도구·커넥터로 답할 수 있으면 '할 수 있다/주면 해보겠다'고 설명하거나 되묻지 말고, **즉시 도구를 호출해 실제 결과로** 답하라.\n"
+    "- 사실·수치·최신 정보·사내 자료를 다루는 요청에서 도구를 한 번도 호출하지 않고 기억만으로 답하는 것은 **실패**다. "
+    "반드시 web_search 또는 커넥터를 최소 1회 호출해 근거를 확보한 뒤 답한다. (예외: 순수 의견·계산·전사 정리)\n"
     "- '○○에 접근 가능해?' 처럼 능력을 묻더라도, 가능하면 직접 한 번 조회해 결과(또는 실제 실패 사유)로 보여줘라.\n"
     "- 검색어가 모호하면 발화·맥락에서 핵심 키워드를 스스로 뽑아 일단 검색한다. 사용자에게 키워드를 되묻지 마라.\n"
-    "- 커넥터(Atlassian/Confluence·Slack·Notion·GitHub 등)는 등록돼 있으면 그 도구로 실제 조회한다.\n"
+    "- 커넥터(Atlassian/Confluence·Slack·Notion·GitHub 등)는 등록돼 있으면 그 도구로 실제 조회한다. "
+    "사내 문서·일정·이슈·채널·담당자 얘기가 나오면 웹 검색보다 커넥터를 먼저 시도한다. "
+    "첫 도구가 실패하면 다른 도구/검색어로 한 번 더 시도한 뒤에야 한계를 보고한다.\n"
     "반드시 아래 JSON 한 개만 출력한다(설명 금지):\n"
     '{"title": str, "spoken": str, "intent": "search|browse|answer|note|action|none", "blocks": [...]}\n'
     f"{ALLOWED_BLOCKS}\n"
@@ -200,6 +207,45 @@ LANG_NAME = {"ko": "한국어", "en": "English", "zh": "中文(简体)"}
 
 def _lang_line(cfg: "BrainConfig") -> str:
     return f"\n[출력 언어] 모든 텍스트(title·spoken·blocks·say)를 반드시 {LANG_NAME.get(cfg.lang, '한국어')}로 작성한다."
+
+
+# codex exec에 노출되는 커넥터(MCP) 이름 캐시 — 매 턴 `codex mcp list` 호출을 피한다.
+_MCP_CACHE: dict = {"t": 0.0, "names": []}
+
+
+def _mcp_names(ttl: float = 300.0) -> list:
+    """[mcp_servers]에 등록된 커넥터 이름 목록(TTL 캐시). 실패 시 빈 리스트."""
+    now = time.time()
+    if now - _MCP_CACHE["t"] > ttl:
+        names: list = []
+        try:
+            r = subprocess.run(["codex", "mcp", "list"], capture_output=True, text=True, timeout=8)
+            for raw in r.stdout.splitlines():
+                s = raw.strip()
+                if not s or s.lower().startswith("name"):
+                    continue
+                names.append(s.split()[0])
+        except Exception:  # noqa: BLE001
+            pass
+        _MCP_CACHE.update(t=now, names=names)
+    return _MCP_CACHE["names"]
+
+
+def _tools_line(cfg: "BrainConfig") -> str:
+    """codex 턴 프롬프트에 주입할 '지금 실제로 쓸 수 있는 도구' 인벤토리.
+
+    모델이 도구 존재를 모르고 텍스트로만 답하는 문제를 줄인다 — 이름을 명시하면
+    '커넥터로 조회하라'는 지시가 실행 가능한 구체 지시가 된다.
+    """
+    if cfg.backend != "codex":
+        return ""
+    conns = [n for n in _mcp_names() if n and n != "node_repl"]
+    conn_txt = ", ".join(conns) if conns else "(등록된 커넥터 없음)"
+    return (
+        "\n[지금 이 턴에서 실제 호출 가능한 도구]\n"
+        f"- web_search: 실시간 웹 검색\n- shell: 명령 실행(계산·파일·코드)\n- 커넥터(MCP): {conn_txt}\n"
+        "사실 확인이 필요한 요청이면 답하기 전에 위 도구를 실제로 호출한다."
+    )
 
 
 # ── 유틸 ────────────────────────────────────────────────────────────────────
@@ -582,6 +628,7 @@ def _act_codex(query: str, context: str, cfg: BrainConfig, system: str = ACT_SYS
         out_path = Path(f.name)
     cmd = [
         "codex", "exec", "--skip-git-repo-check",
+        "-s", "workspace-write",  # 도구(shell·임시파일)가 실제로 동작하게 — 기본 read-only면 행동이 위축된다
         "-c", "tools.web_search=true",  # 웹검색·브라우저·MCP 커넥터 내장 활용
         "--output-last-message", str(out_path),
         "-c", f'model_reasoning_effort="{cfg.reasoning_effort}"',
@@ -590,9 +637,10 @@ def _act_codex(query: str, context: str, cfg: BrainConfig, system: str = ACT_SYS
         cmd += ["--output-schema", str(_GENUI_SCHEMA_PATH)]
     if cfg.codex_model:
         cmd += ["-m", cfg.codex_model]
-    prompt = f"{system}\n\n[맥락]\n{context}\n\n[요청]\n{query}"
+    prompt = f"{system}{_tools_line(cfg)}\n\n[맥락]\n{context}\n\n[요청]\n{query}"
     cmd.append(prompt)
-    subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=240)
+    subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=240,
+                   cwd=tempfile.gettempdir())
     raw = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
     out_path.unlink(missing_ok=True)
     fallback = raw.strip() if (raw and not raw.lstrip().startswith("{")) else query
@@ -710,6 +758,7 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
 
     cmd = [
         "codex", "exec", "--json", "--skip-git-repo-check",
+        "-s", "workspace-write",  # 도구(shell·임시파일)가 실제로 동작하게
         "-c", "tools.web_search=true",
         "-c", f'model_reasoning_effort="{cfg.reasoning_effort}"',
     ]
@@ -717,11 +766,11 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
         cmd += ["--output-schema", str(_GENUI_SCHEMA_PATH)]
     if cfg.codex_model:
         cmd += ["-m", cfg.codex_model]
-    cmd.append(f"{system}{_lang_line(cfg)}\n\n[맥락]\n{context}\n\n[요청]\n{query}")
+    cmd.append(f"{system}{_tools_line(cfg)}{_lang_line(cfg)}\n\n[맥락]\n{context}\n\n[요청]\n{query}")
 
     proc = subprocess.Popen(
         cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL, text=True, bufsize=1,
+        stderr=subprocess.DEVNULL, text=True, bufsize=1, cwd=tempfile.gettempdir(),
     )
     final_text = ""
     error_msg: Optional[str] = None
@@ -828,6 +877,19 @@ def codex_act_stream(query: str, context: str = "", cfg: Optional[BrainConfig] =
     yield ("result", _normalize_spec(spec, fallback_text=fallback))
 
 
+def _spec_has_content(spec: Optional[dict]) -> bool:
+    """회의록/카드 spec에 '진짜 내용'이 있는지 — 빈 blocks나 에러 callout뿐이면 False."""
+    if not isinstance(spec, dict):
+        return False
+    blocks = spec.get("blocks")
+    if not isinstance(blocks, list) or not blocks:
+        return False
+    return not all(
+        isinstance(b, dict) and b.get("type") == "callout" and b.get("value") in ("error", "warn")
+        for b in blocks
+    )
+
+
 def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: str = "",
                    system: Optional[str] = None, with_image: bool = True):
     """회의록 생성: AI 백엔드가 전사 전체를 이해해 상세 회의록 JSON을 만든다.
@@ -838,18 +900,24 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: 
     system = system or MINUTES_SYSTEM
     ctx_block = (f"[회의 배경(사용자 제공) — 고유명사·맥락 참고]\n{context}\n\n" if context.strip() else "")
     user_input = f"{ctx_block}[회의 전사 전체]\n{transcript}"
-    if cfg.backend != "codex":
-        yield ("progress", "회의록 정리 중…")
-        yield ("result", act("아래 회의 전사를 이해해 상세 회의록을 작성해줘.", user_input, cfg, system))
-        return
+
+    def _make() -> dict:
+        return act("아래 회의 전사를 처음부터 끝까지 이해한 뒤, 주제별로 상세 회의록을 작성해줘.",
+                   user_input, cfg, system)
 
     # 1) 구조화 회의록(요약·논의·결정·액션) — 먼저 빠르게 내보낸다(이미지 기다리다 타임아웃 방지).
     yield ("progress", "회의록 정리 중…")
-    spec = act("아래 회의 전사를 처음부터 끝까지 이해한 뒤, 주제별로 상세 회의록을 작성해줘.", user_input, cfg, system)
+    spec = _make()
+    if not _spec_has_content(spec):
+        # 일시 오류(토큰 레이스·타임아웃 등)로 빈 회의록이 나오면 한 번 재시도 — 빈 minutes.json 저장 방지.
+        yield ("progress", "회의록이 비어 다시 정리 중…")
+        retry = _make()
+        if _spec_has_content(retry):
+            spec = retry
     spec["title"] = spec.get("title") or "회의록"
     yield ("result", spec)  # ← 텍스트 회의록 먼저 표시(클라이언트 타임아웃 해제)
 
-    if not with_image:
+    if not with_image or cfg.backend != "codex" or not _spec_has_content(spec):
         return
 
     # 2) 손글씨 이미지(느림·불안정)는 best-effort로 뒤에 붙여 두 번째 result로 갱신.
@@ -859,9 +927,13 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: 
         if os.path.exists(img_path):
             os.unlink(img_path)
         img_prompt = MINUTES_IMG_PROMPT.format(path=img_path, transcript=transcript)
+        # 기본 샌드박스(read-only)는 PNG를 쓸 수 없어 이미지가 조용히 사라졌다 →
+        # workspace-write + tmp cwd로 실제 저장이 가능하게 한다.
         subprocess.run(
-            ["codex", "exec", "--skip-git-repo-check", "-c", 'model_reasoning_effort="medium"', img_prompt],
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180,
+            ["codex", "exec", "--skip-git-repo-check", "-s", "workspace-write",
+             "-c", 'model_reasoning_effort="medium"', img_prompt],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=240,
+            cwd=tempfile.gettempdir(),
         )
         if os.path.exists(img_path) and os.path.getsize(img_path) > 1000:
             data = base64.b64encode(open(img_path, "rb").read()).decode()
@@ -869,5 +941,7 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: 
             spec["blocks"].append({"type": "heading", "text": "손글씨 정리"})
             spec["blocks"].append({"type": "image", "url": f"data:image/png;base64,{data}", "label": "Ghost 손글씨 회의록"})
             yield ("result", spec)  # ← 이미지 포함해 카드 갱신
+        else:
+            yield ("progress", "손글씨 이미지는 이번엔 만들지 못했어요(회의록은 완료)")
     except Exception:  # noqa: BLE001
         pass  # 이미지는 부가 기능 — 실패해도 텍스트 회의록은 이미 전달됨

@@ -324,12 +324,62 @@ def transcript_text(meeting_id: str) -> str:
     return "\n".join(item.get("text", "") for item in read_transcript(meeting_id))
 
 
+def replace_last_transcript(meeting_id: str, old_text: str, new_text: str) -> bool:
+    """가장 최근의 old_text 발화를 new_text로 교체(실시간 다듬기 반영).
+
+    transcript.jsonl만 고친다 — 회의록·요약은 jsonl을 읽으므로 교정이 하류 전체에 반영된다.
+    (transcript.md는 append-only 로그라 그대로 둔다.)"""
+    old_text, new_text = (old_text or "").strip(), (new_text or "").strip()
+    if not old_text or not new_text or old_text == new_text:
+        return False
+    with _LOCK:
+        path = _meeting_path(meeting_id) / "transcript.jsonl"
+        if not path.exists():
+            return False
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for i in range(len(lines) - 1, -1, -1):
+            try:
+                rec = json.loads(lines[i])
+            except json.JSONDecodeError:
+                continue
+            if (rec.get("text") or "").strip() == old_text:
+                rec["text"] = new_text
+                rec["polished"] = True
+                lines[i] = json.dumps(rec, ensure_ascii=False)
+                tmp = path.with_suffix(".jsonl.tmp")
+                tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                tmp.replace(path)
+                return True
+    return False
+
+
 # ── 회의록 / 다이제스트 저장 ────────────────────────────────────────────────
-def save_minutes(meeting_id: str, spec: dict) -> None:
+def _minutes_savable(spec: dict) -> bool:
+    """저장할 가치가 있는 회의록인지 — 빈 blocks·에러/타임아웃 카드(callout만)는 저장하지 않는다.
+
+    이전엔 모델이 빈 spec이나 '응답 실패' 카드를 내도 그대로 minutes.json에 써서
+    멀쩡한 회의가 '빈 회의록'으로 남았다."""
+    if not isinstance(spec, dict):
+        return False
+    blocks = spec.get("blocks")
+    if not isinstance(blocks, list) or not blocks:
+        return False
+    return not all(
+        isinstance(b, dict) and b.get("type") == "callout" and b.get("value") in ("error", "warn")
+        for b in blocks
+    )
+
+
+def save_minutes(meeting_id: str, spec: dict) -> bool:
+    """회의록 spec을 폴더에 영속. 내용이 비었으면 저장하지 않는다(기존 회의록 보호). 저장 여부 반환."""
+    if not _minutes_savable(spec):
+        return False
     with _LOCK:
         folder = _meeting_path(meeting_id)
-        if folder.exists():
-            _write_json(folder / "minutes.json", spec)
+        if not folder.exists():
+            return False
+        _write_json(folder / "minutes.json", spec)
+        return True
 
 
 def get_minutes(meeting_id: str) -> Optional[dict]:

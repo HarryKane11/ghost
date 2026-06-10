@@ -3,7 +3,7 @@ import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, Settings, AudioLines, Square,
   HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Copy,
-  Languages, Columns2, PanelRight, Home, History, MoreHorizontal,
+  Languages, Columns2, PanelRight, Home, History, MoreHorizontal, Ghost as GhostIcon,
 } from "lucide-react";
 import { GhostLogo } from "@/components/GhostLogo";
 import { BrandIcon } from "@/components/BrandIcon";
@@ -120,6 +120,27 @@ function CommandStep({ item, active }: { item: api.ProgressItem; active: boolean
   );
 }
 
+/** 불명확 키워드 확인 칩 — STT가 이상하게 들은 듯한 고유명사를 사용자에게 묻고 용어집에 누적. */
+function UnclearChip({ heard, guess, onConfirm, onSkip, t }: {
+  heard: string; guess: string;
+  onConfirm: (heard: string, term: string) => void;
+  onSkip: (heard: string) => void;
+  t: (k: string, vars?: Record<string, string | number>) => string;
+}) {
+  const [v, setV] = useState(guess || heard);
+  return (
+    <div className="flex items-center gap-2 text-[12px]">
+      <HelpCircle className="size-3.5 shrink-0 text-spark-deep" />
+      <span className="shrink-0 text-steel">{t("unclear.q", { heard })}</span>
+      <input value={v} onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") onConfirm(heard, v); }}
+        className="h-6 min-w-0 flex-1 rounded-md border border-hairline bg-canvas px-2 text-[12px] outline-none focus:border-ink/40" />
+      <button onClick={() => onConfirm(heard, v)} className="shrink-0 rounded-md bg-ink px-2 py-1 text-[11px] font-medium text-canvas">{t("unclear.add")}</button>
+      <button onClick={() => onSkip(heard)} className="shrink-0 text-[11px] text-stone hover:text-foreground">{t("unclear.skip")}</button>
+    </div>
+  );
+}
+
 const GHOST_KEYS = ["ghost.l0", "ghost.l1", "ghost.l2", "ghost.l3", "ghost.l4", "ghost.l5", "ghost.l6"];
 
 /** 유령다운 로딩 문장 롤링. */
@@ -137,8 +158,7 @@ function GhostLoader() {
     </div>
   );
 }
-// TODO: 실제 저장소 URL로 교체하세요.
-const GITHUB_URL = "https://github.com/ghost-app/ghost";
+const GITHUB_URL = "https://github.com/HarryKane11/ghost";
 
 /** localStorage에 영속되는 useState. (테마·음성·소스 등 재실행 시 유지) */
 function usePref<T>(key: string, initial: T): [T, (value: T | ((prev: T) => T)) => void] {
@@ -202,7 +222,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);   // 전사 옵션 메뉴
   const [sttModelsList, setSttModelsList] = useState<api.SttModels | null>(null);
-  const [transTab, setTransTab] = useState<"raw" | "script">("raw");  // 대화기록 / 스크립트
+  const [transTab, setTransTab] = useState<"raw" | "script" | "minutes">("raw");  // 대화기록 / 스크립트 / 회의록
   const [draft, setDraft] = useState("");          // 발화 중 라이브 초안(스트리밍 느낌) → 엔드포인트에서 최종으로 교체
   const [streamingStt, setStreamingStt] = useState(false);  // 활성 STT가 스트리밍 지원(로컬)
   // 마지막 전사에서 '실제로' 쓰인 엔진/모델(모델 전환이 백엔드에 반영됐는지 확인용 배지).
@@ -213,6 +233,14 @@ export default function App() {
   const draftSeqRef = useRef(0);   // 발화 세대 — 종료(다듬기) 후 늦게 오는 초안 무시용
   const [scriptParas, setScriptParas] = useState<api.ScriptParagraph[]>([]);
   const [scriptLoading, setScriptLoading] = useState(false);
+  // 회의록 탭 — 저장된 minutes.json을 보여준다(생성은 기존 카드 경로 재사용).
+  const [minutesSpec, setMinutesSpec] = useState<Spec | null>(null);
+  const [minutesLoading, setMinutesLoading] = useState(false);
+  // 실시간 다듬기(문장 확정 후 맥락·용어집 기반 교정) + 불명확 키워드 질문 큐
+  const [polishOn, setPolishOn] = usePref<boolean>("ghost.polishOn", true);
+  const polishOnRef = useRef(polishOn);
+  useEffect(() => { polishOnRef.current = polishOn; }, [polishOn]);
+  const [unclears, setUnclears] = useState<{ heard: string; guess: string }[]>([]);
   // 디스플레이 모드 + 패널 분할 + 인터뷰 번역
   const [displayMode, setDisplayMode] = usePref<"full" | "assist">("ghost.displayMode", "full");
   const [translateOn, setTranslateOn] = usePref("ghost.translateOn", false);   // 실시간 번역 토글(우하단)
@@ -221,7 +249,7 @@ export default function App() {
   const [transLang, setTransLang] = usePref<string>("ghost.transLang", "en");
   const [transLangs, setTransLangs] = useState<api.TransLang[]>([]);
   const [translations, setTranslations] = useState<Record<string, string>>({});
-  const [transcript, setTranscript] = useState<{ id: string; text: string }[]>([]);
+  const [transcript, setTranscript] = useState<{ id: string; text: string; polished?: boolean }[]>([]);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [input, setInput] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -329,17 +357,29 @@ export default function App() {
   }, [translateOn, appMode, transLang, transcript, translations]);
 
   // 패널 분할 드래그(리사이즈 핸들러)
+  // 포인터 캡처로 드래그가 핸들을 벗어나도(빠른 드래그·iframe·카드 위) move가 계속 들어온다.
+  // pointercancel·캡처 해제까지 정리해 '가끔 안 먹히는' 문제를 없앤다.
   const splitRef = useRef<HTMLDivElement | null>(null);
   const startSplitDrag = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
+    const handle = e.currentTarget as HTMLElement;
+    try { handle.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    document.body.classList.add("split-dragging");   // 드래그 중 텍스트 선택·iframe 이벤트 차단
     const onMove = (ev: PointerEvent) => {
       const el = splitRef.current; if (!el) return;
       const r = el.getBoundingClientRect();
       setSplitPct(Math.min(72, Math.max(28, ((ev.clientX - r.left) / r.width) * 100)));
     };
-    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    const cleanup = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", cleanup);
+      handle.removeEventListener("pointercancel", cleanup);
+      try { handle.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      document.body.classList.remove("split-dragging");
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", cleanup);
+    handle.addEventListener("pointercancel", cleanup);
   }, [setSplitPct]);
   // 첫 실행이면 온보딩을 띄운다.
   useEffect(() => { if (!localStorage.getItem(ONBOARDED_KEY)) setOnboard(true); }, []);
@@ -374,20 +414,47 @@ export default function App() {
   }, [active]);
 
   // 스크립트 탭: 열려 있으면 정제 문단을 불러오고, 청취 중엔 주기적으로 갱신(실시간 문단 요약).
+  // 로딩 표시는 '처음 비어 있을 때만' — 15초 주기 갱신마다 깜빡이던 문제 수정.
   useEffect(() => {
     if (transTab !== "script") return;
     const mid = meetingIdRef.current;
     if (!mid) { setScriptParas([]); return; }
     let alive = true;
-    const load = async () => {
-      setScriptLoading(true);
-      const s = await api.getScript(mid, !active);  // 정지 상태면 꼬리까지 flush
-      if (alive) { setScriptParas(s); setScriptLoading(false); }
+    let busy = false;   // 응답이 주기(15s)보다 느릴 때 요청이 쌓이지 않게
+    const load = async (first = false) => {
+      if (busy) return;
+      busy = true;
+      if (first) setScriptLoading(true);
+      try {
+        const s = await api.getScript(mid, !active);  // 정지 상태면 꼬리까지 flush
+        if (alive) setScriptParas(s);
+      } finally {
+        busy = false;
+        if (alive && first) setScriptLoading(false);
+      }
     };
-    load();
-    const id = active ? setInterval(load, 15000) : null;
+    load(true);
+    const id = active ? setInterval(() => load(false), 15000) : null;
     return () => { alive = false; if (id) clearInterval(id); };
   }, [transTab, active]);
+
+  // 회의록 탭: 열면 저장된 minutes.json을 불러온다. 회의 진행 중이어도 이미 만든 회의록은 보인다.
+  const loadMinutesTab = useCallback(async () => {
+    const mid = meetingIdRef.current;
+    if (!mid) { setMinutesSpec(null); return; }
+    setMinutesLoading(true);
+    try {
+      const full = await api.getMeeting(mid);
+      setMinutesSpec((full?.minutes as Spec) || null);
+    } finally { setMinutesLoading(false); }
+  }, []);
+  useEffect(() => { if (transTab === "minutes") loadMinutesTab(); }, [transTab, loadMinutesTab]);
+  // 회의록이 아직 없으면 탭이 열린 동안 가볍게 폴링 — '회의록 생성' 진행 중 결과가 도착하면 바로 보인다.
+  useEffect(() => {
+    if (transTab !== "minutes" || minutesSpec) return;
+    const id = setInterval(loadMinutesTab, 8000);
+    return () => clearInterval(id);
+  }, [transTab, minutesSpec, loadMinutesTab]);
 
   // 창이 비활성일 때 카드가 뜨면 데스크탑 알림
   const notify = useCallback((title: string, body: string) => {
@@ -450,6 +517,8 @@ export default function App() {
             updateCard(id, { status: "done", spec, backend });
             pushHistory(`Ghost[${spec?.title || ""}]: ${(spec?.spoken || blocks.find((b) => b.type === "text")?.text || "").slice(0, 180)}`);
             notify(spec?.title || "Ghost", spec?.spoken || "새 카드가 도착했어요");
+            // 플로팅 오브가 떠 있으면 — 회의 중 자기 생각을 밝히듯 말풍선으로 알린다.
+            try { (window as any).ghost?.orbBubble?.(spec?.spoken || spec?.title || ""); } catch { /* ignore */ }
             if (opts.voice && spec?.spoken) speak(spec.spoken);
           }
           finish();
@@ -526,8 +595,30 @@ export default function App() {
   // 배치(onUtterance)와 realtime 확정(onCommitted)이 공유한다.
   const ingestUtterance = useCallback(async (text: string, mid: string) => {
     if (!text) return;
+    const lineId = newId();
     transcriptRef.current = [...transcriptRef.current, text];
-    setTranscript((t) => [...t, { id: newId(), text }].slice(-200));
+    setTranscript((t) => [...t, { id: lineId, text }].slice(-200));
+    // 문장 확정 직후 비동기 다듬기 — 지금까지의 맥락+용어집으로 오인식만 교정(라우팅을 막지 않음).
+    // 교정되면 줄을 제자리에서 갱신하고, 불명확 키워드는 사용자에게 물어 용어집으로 누적한다.
+    if (polishOnRef.current && mid) {
+      api.polishLine(text, mid).then((p) => {
+        if (!p) return;
+        if (p.changed && p.text) {
+          setTranscript((ts) => ts.map((l) => (l.id === lineId ? { ...l, text: p.text, polished: true } : l)));
+          const idx = transcriptRef.current.lastIndexOf(text);
+          if (idx >= 0) transcriptRef.current[idx] = p.text;
+        }
+        if (p.unclear?.length) {
+          setUnclears((u) => {
+            const next = [...u];
+            for (const x of p.unclear) {
+              if (x.heard && !next.some((n) => n.heard === x.heard)) next.push({ heard: x.heard, guess: x.guess || "" });
+            }
+            return next.slice(-3);
+          });
+        }
+      }).catch(() => {});
+    }
     const histCtx = historyRef.current.slice(-12).join("\n");
     pushHistory(`발화: ${text}`);
     // wakeword("재키"/"자비스"/"고스트")로 부르면 음성으로 응답한다.
@@ -585,6 +676,18 @@ export default function App() {
     ingestUtterance(text.trim(), meetingIdRef.current);
   }, [ingestUtterance]);
 
+  // 불명확 키워드 확인 — 사용자가 표기를 확정하면 전역 용어집에 누적(다음 전사부터 정확해짐).
+  const confirmUnclear = useCallback(async (heard: string, term: string) => {
+    setUnclears((u) => u.filter((x) => x.heard !== heard));
+    const v = (term || "").trim();
+    if (!v) return;
+    try {
+      const g = await api.getGlossary();
+      if (!g.some((i) => i.term === v)) await api.setGlossary([...g, { term: v, note: "" }]);
+      flash(t("unclear.added", { term: v }));
+    } catch { /* ignore */ }
+  }, [t]);
+
   const toggleActive = useCallback(async () => {
     if (active) {
       setActive(false); stop(); setDraft("");
@@ -612,9 +715,11 @@ export default function App() {
       const realtime = kind === "elevenlabs";   // ws committed가 확정 라인을 주도
       streamingSttRef.current = !kind; nativeStreamRef.current = !!kind;
       if (realtime) setEngineUsed({ model: "scribe_v2_realtime", engine: "elevenlabs-realtime", provider: "elevenlabs", fallback: false });
+      // 배치(onUtterance)·interim(onInterim)은 항상 넘긴다 — ws가 살아 있는 동안엔 훅 내부에서
+      // 자동으로 비활성(이중 과금 X)이고, ws가 끊기면 그대로 폴백돼 전사가 멈추지 않는다.
       await start(
-        realtime ? null : onUtterance,             // realtime은 ws committed가 최종 → 배치 비활성
-        kind ? null : onInterim,                    // ws가 있으면 interim-blob 대신 ws 부분결과
+        onUtterance,
+        onInterim,
         source, source === "mic" ? micId || undefined : undefined,
         ws,
         kind ? setDraft : null,                     // ws 부분결과 → 라이브 초안
@@ -805,6 +910,11 @@ export default function App() {
   // 언마운트 시 데모 타이머 정리
   useEffect(() => () => demoTimersRef.current.forEach(clearTimeout), []);
 
+  // 플로팅 오브에 청취 상태 동기화(초록 라이브 점)
+  useEffect(() => {
+    try { (window as any).ghost?.orbState?.({ active }); } catch { /* ignore */ }
+  }, [active]);
+
   // 트레이 / 전역 단축키(⌘⇧G)의 청취 토글 요청 구독 (Electron)
   useEffect(() => {
     const g = (window as { ghost?: { onToggleListen?: (cb: () => void) => () => void } }).ghost;
@@ -858,6 +968,9 @@ export default function App() {
               </button>
             ))}
           </div>
+          {!!g.hideToOrb && (
+            <button onClick={() => g.hideToOrb()} title={t("orb.collapse")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><GhostIcon className="size-4" /></button>
+          )}
           <button onClick={() => setHelpOpen(true)} title={t("header.help")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><HelpCircle className="size-4" /></button>
           <button onClick={() => setAdminOpen(true)} title={t("header.settings")} className="grid size-8 place-items-center rounded-lg text-steel hover:bg-surface hover:text-foreground"><Settings className="size-4" /></button>
           <button onClick={goHome} title={t("header.home")} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-hairline px-2.5 text-[12px] text-steel hover:bg-surface hover:text-foreground"><Home className="size-3.5" /> {t("header.home")}</button>
@@ -894,10 +1007,10 @@ export default function App() {
           <div className="flex items-center gap-2 px-4 py-2.5">
             <AudioLines className="size-3.5 text-stone" />
             <div className="flex items-center gap-1">
-              {(["raw", "script"] as const).map((tab) => (
+              {(["raw", "script", "minutes"] as const).map((tab) => (
                 <button key={tab} onClick={() => setTransTab(tab)}
-                  className={cn("rounded-md px-2 py-0.5 text-[11.5px] font-medium transition-colors", transTab === tab ? "bg-surface text-foreground" : "text-stone hover:text-foreground")}>
-                  {tab === "raw" ? t("trans.tabRaw") : t("trans.tabScript")}
+                  className={cn("whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px] font-medium transition-colors", transTab === tab ? "bg-surface text-foreground" : "text-stone hover:text-foreground")}>
+                  {tab === "raw" ? t("trans.tabRaw") : tab === "script" ? t("trans.tabScript") : t("trans.tabMinutes")}
                 </button>
               ))}
               {translateOn && transTab === "raw" && (
@@ -915,6 +1028,10 @@ export default function App() {
                     <div className="fixed inset-0 z-20" onClick={() => setToolsOpen(false)} />
                     <div className="absolute right-0 top-9 z-30 w-52 rounded-xl border border-hairline bg-background p-1 shadow-lg">
                       <button onClick={() => { openContext(); setToolsOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft"><FileText className="size-4 shrink-0 text-stone" /> {t("trans.context")}</button>
+                      <button onClick={() => setPolishOn((v) => !v)} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft">
+                        <Sparkles className="size-4 shrink-0 text-stone" /> {t("trans.polish")}
+                        {polishOn && <Check className="ml-auto size-3.5 shrink-0 text-spark-deep" />}
+                      </button>
                       <button onClick={() => { setSearchOpen((v) => !v); if (searchOpen) setTq(""); setToolsOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft"><Search className="size-4 shrink-0 text-stone" /> {t("trans.search")}</button>
                       <button onClick={() => { copyTranscript(); setToolsOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft"><Copy className="size-4 shrink-0 text-stone" /> {t("trans.copy")}</button>
                       <button onClick={() => { exportMd(); setToolsOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-steel hover:bg-surface-soft"><Download className="size-4 shrink-0 text-stone" /> {t("trans.export")}</button>
@@ -977,9 +1094,47 @@ export default function App() {
               {status && !status.stt_ready ? t("trans.loadingModel") : demoOn ? t("trans.demoPlaying") : active ? (speaking ? t("trans.listening") : t("trans.waiting")) : t("trans.off")}
             </span>
           </div>
+          {/* 불명확 키워드 질문 — 사용자가 표기를 확정하면 용어집에 누적돼 다음 전사가 정확해진다 */}
+          {unclears.length > 0 && transTab === "raw" && (
+            <div className="space-y-1.5 border-b border-hairline/60 px-4 py-2">
+              {unclears.map((u) => (
+                <UnclearChip key={u.heard} heard={u.heard} guess={u.guess} t={t}
+                  onConfirm={confirmUnclear}
+                  onSkip={(h) => setUnclears((x) => x.filter((y) => y.heard !== h))} />
+              ))}
+            </div>
+          )}
           <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-4 py-3">
-            {/* 스크립트 탭: 문단별 불릿 요약 + 정제 본문 */}
-            {transTab === "script" ? (
+            {/* 회의록 탭: 저장된 minutes.json (실시간 스크립트와 별개의 산출물) */}
+            {transTab === "minutes" ? (
+              <div className="space-y-3.5">
+                {minutesLoading && !minutesSpec ? (
+                  <p className="rounded-lg border border-dashed border-hairline px-3 py-6 text-center text-[12px] text-stone">{t("trans.minutesLoading")}</p>
+                ) : minutesSpec ? (
+                  <>
+                    <GenUI spec={minutesSpec} onAction={runManual} />
+                    <div className="flex justify-end">
+                      <button onClick={() => { generateMinutes(); }} disabled={thinking}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-hairline px-3 py-1.5 text-[11.5px] text-steel hover:text-foreground disabled:opacity-40">
+                        <RefreshCw className="size-3" /> {t("trans.minutesRegen")}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-hairline px-3 py-6 text-center">
+                    <p className="text-[12px] leading-relaxed text-stone">
+                      {meetingIdRef.current ? t("trans.minutesEmpty") : t("trans.minutesNeedMeeting")}
+                    </p>
+                    {!!meetingIdRef.current && transcriptRef.current.length > 0 && (
+                      <button onClick={() => { generateMinutes(); }} disabled={thinking}
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-ink px-3.5 py-1.5 text-[12px] font-medium text-canvas disabled:opacity-40">
+                        <FileText className="size-3.5" /> {t("trans.minutesGenerate")}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : transTab === "script" ? (
               <div className="space-y-3.5">
                 {scriptParas.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-hairline px-3 py-6 text-center text-[12px] text-stone">
@@ -1011,7 +1166,7 @@ export default function App() {
               // 인터뷰 모드면 각 줄 아래 번역을 함께 보여준다(이중 언어).
               return shown.map((ln) => (
                 <div key={ln.id} className="transcript-settle rounded-md px-1">
-                  <p className="text-[13px] leading-relaxed text-slate">{ln.text}</p>
+                  <p className={cn("text-[13px] leading-relaxed text-slate", ln.polished && "polish-glow")}>{ln.text}</p>
                   {translateOn && (
                     <p className="mt-0.5 text-[12.5px] leading-relaxed text-spark-deep">
                       {translations[`${transLang}:${ln.id}`] ?? <span className="italic text-stone">…</span>}
