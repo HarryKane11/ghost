@@ -294,12 +294,17 @@ export default function App() {
   useEffect(() => { refreshStatus(); }, [refreshStatus]);
   // @ 참조용 최근 회의 목록 (메뉴 열 때·회의 종료 시 갱신)
   const loadRecentMeetings = useCallback(() => { api.getMeetings().then(setRecentMeetings).catch(() => {}); }, []);
-  // 회의 내역에서 한 건 열기 → 회의록(또는 요약)을 카드로 띄움.
+  // 회의 내역에서 한 건 열기 → 회의록(또는 요약) + 최근 다이제스트를 카드로 복원.
   const openMeetingCard = useCallback(async (m: api.MeetingMeta) => {
     const full = await api.getMeeting(m.id);
     const spec = full?.minutes || { title: m.title, spoken: "", intent: "note",
       blocks: [{ type: "text", text: full?.summary || t("hist.noMinutes") }] };
     pushFeed({ kind: "card", id: newId(), query: m.title, status: "done", progress: [], spec, pinned: true });
+    // 저장된 5분 다이제스트도 함께 복원(최근 2개) — 재시작 후에도 회의 흐름이 보인다.
+    const digests = await api.getDigests(m.id);
+    for (const d of digests.slice(-2)) {
+      if (d?.spec) pushFeed({ kind: "card", id: newId(), query: `${m.title} · 다이제스트`, status: "done", progress: [], spec: d.spec });
+    }
   }, [pushFeed, t]);
   useEffect(() => { loadRecentMeetings(); }, [loadRecentMeetings]);
   // 디스플레이 모드 → Electron 창 크기/always-on-top 동기화 + 번역 언어 목록
@@ -1373,6 +1378,9 @@ export default function App() {
         </div>
       )}
 
+    </div>
+    {/* ↓ 전체화면 오버레이들은 hidden 컨테이너 '밖'에 둔다 — 런처(home)에서 설정/도움말/온보딩이
+        안 열리던 버그 수정(부모 display:none이 fixed 자식까지 숨겼다). */}
       {/* 전체화면 관리자 페이지(톱니바퀴) — 회의 아카이브 + 모델·커넥터·용어집·저장 설정 */}
       <SettingsMenu variant="page" open={adminOpen} isMac={isMacApp} onClose={() => setAdminOpen(false)} status={status}
         onStatus={setStatus}
@@ -1418,7 +1426,6 @@ export default function App() {
       <Help open={helpOpen} onClose={() => setHelpOpen(false)} isMac={isMacApp} />
 
       {toast && <div className="pointer-events-none fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-[12.5px] text-canvas shadow-lg">{toast}</div>}
-    </div>
    </LangProvider>
   );
 }

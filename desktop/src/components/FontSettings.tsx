@@ -13,7 +13,8 @@ export function loadAppFont(): void {
 
 export function applyAppFont(family: string): void {
   const root = document.documentElement;
-  if (family) root.style.setProperty("--app-font", `"${family}"`);
+  // 폴백 스택 동봉 — 다른 기기로 설정이 옮겨가 폰트가 없어도 시스템 글꼴로 자연 강등.
+  if (family) root.style.setProperty("--app-font", `"${family}", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`);
   else root.style.removeProperty("--app-font");
 }
 

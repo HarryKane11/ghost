@@ -32,7 +32,14 @@ export function AudioView({
   transLangs: api.TransLang[];
   lang: string;
 }) {
-  const [outLang, setOutLang] = useState(lang || "ko");   // 회의록 출력 언어(입력 음성과 무관)
+  // 회의록 출력 언어(입력 음성과 무관) — 모드를 나갔다 와도 선택이 유지되게 영속.
+  const [outLang, setOutLangState] = useState(() => {
+    try { return localStorage.getItem("ghost.audioOutLang") || lang || "ko"; } catch { return lang || "ko"; }
+  });
+  const setOutLang = (v: string) => {
+    setOutLangState(v);
+    try { localStorage.setItem("ghost.audioOutLang", v); } catch { /* ignore */ }
+  };
   const [phase, setPhase] = useState<Phase>("empty");
   const [fileName, setFileName] = useState("");
   const [audioUrl, setAudioUrl] = useState<string>("");

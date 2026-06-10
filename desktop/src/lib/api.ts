@@ -19,6 +19,7 @@ export type Status = {
   backends: string[];
   openai_key?: boolean;
   stt_ready?: boolean;
+  stt_error?: string | null;
   codex_model?: string | null;
   codex_models?: string[];
   reasoning_effort?: string;

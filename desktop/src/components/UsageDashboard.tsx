@@ -28,15 +28,25 @@ export function UsageDashboard({ t }: { t: (k: string) => string }) {
   const c = u.codex;
   const pct = c.budget_pct;
 
-  const saveBudget = async () => { const x = await api.setUsageBudget(parseFloat(budget) || 0); if (x) setU(x); };
+  // 음수·문자 입력은 저장 비활성(이전: 조용히 0으로 저장돼 혼란).
+  const budgetNum = parseFloat(budget);
+  const budgetValid = budget.trim() === "" || (!Number.isNaN(budgetNum) && budgetNum >= 0);
+  const saveBudget = async () => {
+    if (!budgetValid) return;
+    const x = await api.setUsageBudget(Number.isNaN(budgetNum) ? 0 : Math.max(0, budgetNum));
+    if (x) setU(x);
+  };
   const reset = async () => { const x = await api.resetUsage(); if (x) { setU(x); setBudget(""); } };
 
   return (
     <div className="mb-4 rounded-xl border border-hairline p-3.5">
       <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold tracking-tight">
         <Gauge className="size-4 text-steel" />{t("usage.title")}
-        <button onClick={reset} className="ml-auto inline-flex items-center gap-1 text-[11px] text-stone hover:text-foreground">
-          <RotateCcw className="size-3" /> {t("usage.reset")}
+        <button onClick={load} title={t("usage.refresh")} className="ml-auto inline-flex items-center gap-1 text-[11px] text-stone hover:text-foreground">
+          <RotateCcw className="size-3" /> {t("usage.refresh")}
+        </button>
+        <button onClick={reset} className="inline-flex items-center gap-1 text-[11px] text-stone hover:text-foreground">
+          {t("usage.reset")}
         </button>
       </div>
 
@@ -63,9 +73,9 @@ export function UsageDashboard({ t }: { t: (k: string) => string }) {
           )}
           <div className="flex items-center gap-2">
             <Coins className="size-3.5 text-stone" />
-            <input value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" placeholder={t("usage.budget")}
-              className="h-8 w-28 rounded-lg border border-hairline bg-surface-soft px-2.5 text-[12px] text-charcoal outline-none focus:border-ink/40" />
-            <button onClick={saveBudget} className="h-8 rounded-lg border border-hairline px-3 text-[12px] text-steel hover:text-foreground">{t("usage.save")}</button>
+            <input value={budget} onChange={(e) => setBudget(e.target.value)} type="number" min="0" step="0.01" inputMode="decimal" placeholder={t("usage.budget")}
+              className={`h-8 w-28 rounded-lg border bg-surface-soft px-2.5 text-[12px] text-charcoal outline-none focus:border-ink/40 ${budgetValid ? "border-hairline" : "border-[#e9b0b0]"}`} />
+            <button onClick={saveBudget} disabled={!budgetValid} className="h-8 rounded-lg border border-hairline px-3 text-[12px] text-steel hover:text-foreground disabled:opacity-40">{t("usage.save")}</button>
             <span className="text-[10.5px] text-stone">{t("usage.budgetHint")}</span>
           </div>
         </div>
