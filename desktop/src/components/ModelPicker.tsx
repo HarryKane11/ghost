@@ -32,6 +32,10 @@ export function ModelPicker({
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-7 z-30 max-h-72 w-64 overflow-y-auto rounded-xl border border-hairline bg-background p-1 shadow-lg">
+            {/* 목록이 아직 안 왔으면(백엔드 부팅 중) 빈 헤더만 보이던 문제 → 로딩 표시 */}
+            {(!models || (!models.cloud?.length && !models.local?.length)) && (
+              <div className="px-2.5 py-3 text-center text-[11.5px] text-stone">{t("trans.modelsLoading")}</div>
+            )}
             <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-stone">{t("trans.cloud")}</div>
             {models?.cloud.map((m) => (
               <button key={m.id} onClick={() => { onPick("cloud", m.id); setOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-steel hover:bg-surface-soft">

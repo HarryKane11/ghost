@@ -352,6 +352,12 @@ export default function App() {
   useEffect(() => { refreshStreamingStt(); }, [refreshStreamingStt, adminOpen]);
   // STT 모델 목록(파형 옆 빠른 선택용). 관리자 닫힘/시작 시 갱신.
   useEffect(() => { api.getSttModels().then(setSttModelsList).catch(() => {}); }, [adminOpen]);
+  // 백엔드가 늦게 떠도 목록이 채워질 때까지 재시도 — 이전엔 첫 로드 실패 시 피커가 빈 채로 남았다.
+  useEffect(() => {
+    if (sttModelsList) return;
+    const id = setInterval(() => api.getSttModels().then((m) => m && setSttModelsList(m)).catch(() => {}), 3000);
+    return () => clearInterval(id);
+  }, [sttModelsList]);
   // 파형 옆에서 모델을 바로 바꾼다 — provider+model을 함께 설정해 '반영 안 됨' 문제 해결.
   const pickModel = useCallback(async (kind: "local" | "cloud", id: string) => {
     try {

@@ -194,6 +194,7 @@ const DICT: Record<string, Record<Lang, string>> = {
   "settings.expand": { ko: "펼치기", en: "Expand", zh: "展开" },
   "settings.keySet": { ko: "설정됨 (••••)", en: "Set (••••)", zh: "已设置 (••••)" },
   "orb.open": { ko: "Ghost 열기", en: "Open Ghost", zh: "打开 Ghost" },
+  "trans.modelsLoading": { ko: "모델 목록 불러오는 중… (백엔드 준비)", en: "Loading model list… (backend starting)", zh: "正在加载模型列表…（后端启动中）" },
   "trans.folder": { ko: "폴더", en: "Folder", zh: "文件夹" },
   // Ask 패널 추천 프롬프트
   "ask.summary": { ko: "주요 내용 요약", en: "Summarize key points", zh: "总结要点" },

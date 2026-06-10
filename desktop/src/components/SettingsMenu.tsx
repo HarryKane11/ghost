@@ -53,6 +53,12 @@ function SetupDoctor({ status, t }: { status: api.Status | null; t: (k: string) 
   );
 }
 
+/** 그룹 래퍼 — 드로어(전체 스크롤)는 항상 표시, 페이지(사이드바)는 선택 그룹만.
+ * 반드시 모듈 레벨: 부모 리렌더에도 컴포넌트 identity가 유지돼 자식이 리마운트되지 않는다. */
+function Grp({ page, nav, id, children }: { page: boolean; nav: string; id: string; children: React.ReactNode }) {
+  return (!page || nav === id) ? <>{children}</> : null;
+}
+
 const GITHUB_URL = "https://github.com/HarryKane11/ghost";
 const APP_VERSION =
   (typeof window !== "undefined" && (window as { ghost?: { version?: string } }).ghost?.version) || "0.1.0";
@@ -94,9 +100,8 @@ export function SettingsMenu({
     { id: "storage", label: t("admin.navStorage"), icon: <KeyRound className="size-4" /> },
     { id: "meetings", label: t("admin.navMeetings"), icon: <History className="size-4" /> },
   ];
-  // 그룹 래퍼: 드로어(전체 스크롤)는 항상 표시, 페이지(사이드바)는 선택 그룹만.
-  const Grp = ({ id, children }: { id: string; children: React.ReactNode }) =>
-    (!page || nav === id) ? <>{children}</> : null;
+  // (Grp는 모듈 레벨로 — 컴포넌트 안에서 정의하면 리렌더마다 새 타입이 돼
+  //  서브트리가 통째로 리마운트되며 사용량 대시보드가 재조회·깜빡였다.)
   const [connectors, setConnectors] = useState<{ name: string; status: string }[]>([]);
   const [tools, setTools] = useState<{ name: string; desc: string; on: boolean }[]>([]);
   const [meetings, setMeetings] = useState<api.MeetingMeta[]>([]);
@@ -331,7 +336,7 @@ export function SettingsMenu({
           </div>
         </div>
 
-        <Grp id="usage">
+        <Grp page={page} nav={nav} id="usage">
         {/* 파이프라인 플로우 — STT → Agent → TTS(선택) */}
         {(() => {
           const isCloud = status?.stt_provider === "elevenlabs";
@@ -371,7 +376,7 @@ export function SettingsMenu({
         {page && <SetupDoctor status={status} t={t} />}
         {page && <UsageDashboard t={t} />}
         </Grp>
-        <Grp id="appearance">
+        <Grp page={page} nav={nav} id="appearance">
         {page && <FontSettings t={t} />}
 
         {/* 언어 */}
@@ -387,7 +392,7 @@ export function SettingsMenu({
         </Section>
 
         </Grp>
-        <Grp id="agent">
+        <Grp page={page} nav={nav} id="agent">
         {/* Codex auth */}
         <Section icon={<BrandIcon name="codex" size={16} />} title={t("settings.codexTitle")}>
           <div className="mb-2 flex items-center gap-2">
@@ -444,7 +449,7 @@ export function SettingsMenu({
         </Section>
 
         </Grp>
-        <Grp id="stt">
+        <Grp page={page} nav={nav} id="stt">
         {/* STT (음성 인식) */}
         <Section icon={<AudioLines className="size-4 text-steel" />} title={t("settings.sttTitle")}>
           <div className="flex items-center gap-1.5">
@@ -559,7 +564,7 @@ export function SettingsMenu({
         </Section>
 
         </Grp>
-        <Grp id="tts">
+        <Grp page={page} nav={nav} id="tts">
         {/* TTS (음성 응답) — 설치형, 목록만 제공 */}
         <Section icon={<Volume2 className="size-4 text-steel" />} title={t("settings.ttsTitle")}>
           <div className="flex items-center gap-2 text-[12.5px]">
@@ -578,7 +583,7 @@ export function SettingsMenu({
         </Section>
 
         </Grp>
-        <Grp id="connectors">
+        <Grp page={page} nav={nav} id="connectors">
         {/* MCP connectors */}
         <Section icon={<BrandIcon name="codex" size={16} />} title={`${t("settings.connectorsTitle")} (${connectors.length})`}>
           {connectors.length === 0 ? (
@@ -636,7 +641,7 @@ export function SettingsMenu({
         </Section>
 
         </Grp>
-        <Grp id="agent">
+        <Grp page={page} nav={nav} id="agent">
         {/* Codex tools */}
         <Section icon={<BrandIcon name="codex" size={16} />} title={t("settings.toolsTitle")}>
           <div className="space-y-2">
@@ -656,7 +661,7 @@ export function SettingsMenu({
         </Section>
 
         </Grp>
-        <Grp id="proactive">
+        <Grp page={page} nav={nav} id="proactive">
         {/* 능동성 — 다이제스트 주기 · 실시간 개입 민감도 · 자동 조사 */}
         <Section icon={<AudioLines className="size-4 text-steel" />} title={t("settings.proactiveTitle")}>
           <div className="mb-1 text-[11px] text-stone">{t("settings.digestEvery")}</div>
@@ -681,7 +686,7 @@ export function SettingsMenu({
         </Section>
 
         </Grp>
-        <Grp id="storage">
+        <Grp page={page} nav={nav} id="storage">
         {/* 저장 위치 + 로컬 모델 */}
         <Section icon={<History className="size-4 text-steel" />} title={t("settings.storageTitle")}>
           <div className="mb-1 text-[11px] text-stone">{t("settings.storagePath")}</div>
@@ -759,7 +764,7 @@ export function SettingsMenu({
         </Section>
 
         </Grp>
-        <Grp id="meetings">
+        <Grp page={page} nav={nav} id="meetings">
         {/* Meeting history */}
         <Section icon={<History className="size-4 text-steel" />} title={`${t("settings.meetingsTitle")} (${meetings.length})`}>
           {meetings.length === 0 ? (
