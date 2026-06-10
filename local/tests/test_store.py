@@ -72,3 +72,25 @@ def test_notes_and_digests(store):
     # get_meeting에 notes 포함
     full = store.get_meeting(mid)
     assert full["notes"][0]["author"] == "codex"
+
+
+def test_fts_search(store):
+    """FTS 인덱스 경유 검색 — 추가·교정·삭제가 인덱스에 반영된다."""
+    m1 = store.create_meeting()["id"]
+    store.append_transcript(m1, "쿠버네티스 마이그레이션 일정은 8월로 확정합니다.")
+    store.append_transcript(m1, "예산은 다음 분기에 다시 논의합니다.")
+    hits = store.search_meetings("쿠버네티스")
+    assert hits and hits[0]["id"] == m1 and "쿠버네티스" in hits[0]["snippet"]
+    # 교정 반영
+    store.replace_last_transcript(m1, "예산은 다음 분기에 다시 논의합니다.", "예산은 Q3에 다시 논의합니다.")
+    assert store.search_meetings("Q3")
+    # 백필: 인덱스 없이 직접 쓴 회의도 검색됨
+    import json as _json
+    m2 = store.create_meeting()["id"]
+    folder = store._meeting_path(m2)
+    with open(folder / "transcript.jsonl", "a", encoding="utf-8") as f:
+        f.write(_json.dumps({"t": "", "text": "온톨로지 설계 리뷰", "source": "mic"}, ensure_ascii=False) + "\n")
+    assert any(h["id"] == m2 for h in store.search_meetings("온톨로지"))
+    # 삭제 반영
+    store.delete_meeting(m1)
+    assert not any(h["id"] == m1 for h in store.search_meetings("쿠버네티스"))

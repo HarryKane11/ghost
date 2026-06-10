@@ -12,6 +12,27 @@ const MIN_SPEECH_MS = 280;  // 너무 짧은 잡음 무시
 const MAX_UTTER_MS = 20000; // 최대 발화 길이
 const RING_SEC = 26;        // 링버퍼 길이
 
+// AudioWorklet 캡처 프로세서 — 128샘플 블록을 2048샘플로 모아 메인 스레드에 전달.
+// (기존 ScriptProcessor(2048)와 동일한 cadence → VAD·레벨미터 동작 불변)
+const WORKLET_SRC = `
+class GhostCapture extends AudioWorkletProcessor {
+  constructor() { super(); this._buf = new Float32Array(2048); this._n = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    let i = 0;
+    while (i < ch.length) {
+      const take = Math.min(ch.length - i, 2048 - this._n);
+      this._buf.set(ch.subarray(i, i + take), this._n);
+      this._n += take; i += take;
+      if (this._n === 2048) { this.port.postMessage(this._buf.slice(0)); this._n = 0; }
+    }
+    return true;
+  }
+}
+registerProcessor("ghost-capture", GhostCapture);
+`;
+
 /** 입력 PCM을 16kHz로 다운샘플(parakeet 입력용). 단순 데시메이션. */
 function downsampleTo16k(input: Float32Array, inRate: number): Float32Array {
   if (inRate === 16000) return input;
@@ -50,6 +71,7 @@ export function useListening() {
   const aliveRef = useRef(false);   // 청취 중 여부 — 정지 후 오디오 처리/ws 메시지를 확실히 차단
   const ctxRef = useRef<AudioContext | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
+  const workletRef = useRef<AudioWorkletNode | null>(null);
   const srcNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const onUttRef = useRef<((b: Blob) => void) | null>(null);
   const onInterimRef = useRef<((b: Blob) => void) | null>(null);
@@ -106,9 +128,9 @@ export function useListening() {
     }
   }, [extract]);
 
-  const onAudio = useCallback((ev: AudioProcessingEvent) => {
+  // 캡처 경로 공통 처리부 — AudioWorklet(기본)·ScriptProcessor(폴백) 둘 다 여기로 모인다.
+  const processSamples = useCallback((input: Float32Array) => {
     if (!aliveRef.current) return;   // 정지 후엔 어떤 오디오도 처리하지 않음(전사 계속되는 문제 차단)
-    const input = ev.inputBuffer.getChannelData(0);
     const n = input.length;
     const ring = ringRef.current!;
     const N = ring.length;
@@ -174,6 +196,11 @@ export function useListening() {
       }
     }
   }, [finalize]);
+
+  // ScriptProcessor 폴백 경로(구형 환경) — 공통 처리부로 위임.
+  const onAudio = useCallback((ev: AudioProcessingEvent) => {
+    processSamples(ev.inputBuffer.getChannelData(0));
+  }, [processSamples]);
 
   const acquire = useCallback(async (source: Source, deviceId?: string) => {
     let stream: MediaStream;
@@ -246,15 +273,34 @@ export function useListening() {
 
     const srcNode = ctx.createMediaStreamSource(stream);
     srcNodeRef.current = srcNode;
-    const proc = ctx.createScriptProcessor(2048, 1, 1);
-    proc.onaudioprocess = onAudio;
-    procRef.current = proc;
     const sink = ctx.createGain();
     sink.gain.value = 0; // 출력 무음 (에코 방지)
-    srcNode.connect(proc);
-    proc.connect(sink);
+
+    // 1순위: AudioWorklet — 오디오 스레드에서 캡처(메인 스레드 렌더링 부하에 글리치 없음,
+    // ScriptProcessor는 deprecated). 워클릿이 2048 샘플로 모아 보내 기존 VAD cadence 동일.
+    // 실패(미지원·CSP 등) 시 ScriptProcessor로 자동 폴백.
+    let usedWorklet = false;
+    try {
+      const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: "application/javascript" }));
+      await ctx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      const node = new AudioWorkletNode(ctx, "ghost-capture", { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+      node.port.onmessage = (e) => processSamples(e.data as Float32Array);
+      workletRef.current = node;
+      srcNode.connect(node);
+      node.connect(sink);
+      usedWorklet = true;
+    } catch { workletRef.current = null; }
+
+    if (!usedWorklet) {
+      const proc = ctx.createScriptProcessor(2048, 1, 1);
+      proc.onaudioprocess = onAudio;
+      procRef.current = proc;
+      srcNode.connect(proc);
+      proc.connect(sink);
+    }
     sink.connect(ctx.destination);
-  }, [onAudio]);
+  }, [onAudio, processSamples]);
 
   const start = useCallback(
     async (onUtterance: ((b: Blob) => void) | null, onInterim: ((b: Blob) => void) | null, source: Source = "mic", deviceId?: string,
@@ -280,6 +326,7 @@ export function useListening() {
     aliveRef.current = false;   // 즉시 차단 — 이후 onAudio/ws/finalize는 아무것도 안 함
     try { wsRef.current?.close(); } catch {}
     wsRef.current = null;
+    try { workletRef.current?.port.close(); workletRef.current?.disconnect(); } catch {}
     try { procRef.current?.disconnect(); } catch {}
     try { srcNodeRef.current?.disconnect(); } catch {}
     try { ctxRef.current?.close(); } catch {}
@@ -287,6 +334,7 @@ export function useListening() {
     if (curSourceRef.current !== "system") {
       streamRef.current?.getTracks().forEach((t) => t.stop());
     }
+    workletRef.current = null;
     procRef.current = null;
     srcNodeRef.current = null;
     ctxRef.current = null;

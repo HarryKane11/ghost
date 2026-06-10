@@ -921,6 +921,24 @@ export default function App() {
     try { (window as any).ghost?.orbState?.({ active }); } catch { /* ignore */ }
   }, [active]);
 
+  // 업데이트 확인 — 서명/공증 전이라 자동 업데이트 대신, 새 릴리즈를 감지해 다운로드 배너를 띄운다.
+  const [updateInfo, setUpdateInfo] = useState<{ v: string; url: string } | null>(null);
+  useEffect(() => {
+    if (!g.isElectron) return;
+    (async () => {
+      try {
+        const r = await fetch("https://api.github.com/repos/HarryKane11/ghost/releases/latest");
+        if (!r.ok) return;
+        const j = await r.json();
+        const latest = String(j.tag_name || "").replace(/^v/, "");
+        const cur = String(g.version || "0");
+        if (latest && latest.localeCompare(cur, undefined, { numeric: true }) > 0) {
+          setUpdateInfo({ v: latest, url: j.html_url || GITHUB_URL + "/releases" });
+        }
+      } catch { /* 오프라인 등 — 조용히 */ }
+    })();
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
   // 트레이 / 전역 단축키(⌘⇧G)의 청취 토글 요청 구독 (Electron)
   useEffect(() => {
     const g = (window as { ghost?: { onToggleListen?: (cb: () => void) => () => void } }).ghost;
@@ -965,6 +983,13 @@ export default function App() {
           {backendErr ? <><ShieldAlert className="size-3.5" /> {t("header.backendErr")}</> : codexBad ? <><ShieldAlert className="size-3.5" /> {t("header.loginNeeded")}</> : status?.codex_logged_in ? <><ShieldCheck className="size-3.5 text-spark-deep" /> {t("header.connected")}</> : <><RefreshCw className="size-3.5" /> {t("header.refresh")}</>}
         </button>
         <div style={NO_DRAG} className="ml-auto flex items-center gap-1">
+          {/* 새 버전 배너 — 클릭하면 릴리즈 페이지(외부 브라우저) */}
+          {updateInfo && (
+            <a href={updateInfo.url} target="_blank" rel="noreferrer"
+              className="mr-1 inline-flex h-7 items-center gap-1.5 rounded-full border border-spark-soft bg-[color-mix(in_srgb,var(--spark)_10%,transparent)] px-2.5 text-[11.5px] font-medium text-spark-deep hover:bg-[color-mix(in_srgb,var(--spark)_18%,transparent)]">
+              <Download className="size-3" /> {t("update.banner", { v: updateInfo.v })}
+            </a>
+          )}
           {/* 디스플레이 모드 전환 */}
           <div className="mr-1 flex items-center rounded-full border border-hairline bg-surface-soft p-0.5">
             {([["full", Columns2, t("mode.full")], ["assist", PanelRight, t("mode.assist")]] as const).map(([m, Icon, label]) => (

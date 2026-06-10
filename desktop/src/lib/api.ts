@@ -436,7 +436,7 @@ export async function transcribe(blob: Blob, meetingId = "", source = "mic"): Pr
 }
 
 // ── 음성 파일 업로드 모드 ────────────────────────────────────────────────────
-export type AudioSegment = { start: number; end: number; text: string };
+export type AudioSegment = { start: number; end: number; text: string; speaker?: number };
 export type AudioTranscript = { ok: boolean; segments: AudioSegment[]; provider?: string; model?: string; duration?: number };
 export async function uploadAudio(
   file: File,

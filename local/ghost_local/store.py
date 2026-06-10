@@ -292,6 +292,7 @@ def append_transcript(meeting_id: str, text: str, source: str = "mic") -> None:
         with open(folder / "transcript.jsonl", "a", encoding="utf-8") as f:
             f.write(line + "\n")
         _append_md(folder, text)  # 문장 마침 기준 md 실시간 업데이트
+        _fts_add(meeting_id, text)  # 검색 인덱스 증분(실패해도 무해 — 검색 시 백필)
         meta = _read_json(folder / "meeting.json")
         if meta is not None:
             meta["utterance_count"] = int(meta.get("utterance_count", 0)) + 1
@@ -349,6 +350,7 @@ def replace_last_transcript(meeting_id: str, old_text: str, new_text: str) -> bo
                 tmp = path.with_suffix(".jsonl.tmp")
                 tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
                 tmp.replace(path)
+                _fts_replace(meeting_id, old_text, new_text)
                 return True
     return False
 
@@ -492,6 +494,7 @@ def delete_meeting(meeting_id: str) -> bool:
         if not folder.is_dir():
             return False
         _shutil.rmtree(folder, ignore_errors=True)
+        _fts_drop(mid)   # 검색 인덱스에서도 제거(삭제한 회의가 검색에 남지 않게)
         return not folder.exists()
 
 
@@ -537,14 +540,157 @@ def get_meeting(meeting_id: str, include_transcript: bool = True) -> Optional[di
     return out
 
 
-def search_meetings(query: str, limit: int = 20) -> List[dict]:
-    """전체 회의의 전사·제목·요약·결정에서 query를 부분일치 검색. MCP search_meeting용.
+# ── FTS5 검색 인덱스 — 회의가 수백 건이어도 전사 풀스캔 없이 즉시 검색 ────────
+import sqlite3
 
-    경량 substring 검색(대소문자 무시). 매칭된 회의마다 스니펫을 함께 반환.
+
+_FTS_VERSION = 2   # 스키마/토크나이저 바뀌면 올린다 → 인덱스 재생성(백필이 다시 채움)
+
+
+def _search_db() -> sqlite3.Connection:
+    """검색 인덱스 DB(meetings/.search.db). 없거나 버전이 다르면 스키마 (재)생성.
+
+    토크나이저는 trigram — 한국어는 조사가 붙어 한 토큰이 되므로(예: 'Q3에')
+    기본 unicode61로는 'Q3' 검색이 안 맞는다. trigram은 부분 문자열 매칭이 된다(3자+).
     """
-    q = (query or "").strip().lower()
+    db = sqlite3.connect(meetings_dir() / ".search.db", timeout=5)
+    if db.execute("PRAGMA user_version").fetchone()[0] != _FTS_VERSION:
+        db.executescript(
+            "DROP TABLE IF EXISTS lines; DROP TABLE IF EXISTS idx_state;"
+        )
+        db.execute("CREATE VIRTUAL TABLE lines USING fts5(meeting_id UNINDEXED, text, tokenize='trigram')")
+        db.execute("CREATE TABLE idx_state (meeting_id TEXT PRIMARY KEY, n INTEGER)")
+        db.execute(f"PRAGMA user_version = {_FTS_VERSION}")
+        db.commit()
+    return db
+
+
+def _fts_add(meeting_id: str, text: str) -> None:
+    """전사 1줄을 인덱스에 추가(핫패스 — 실패해도 전사 저장엔 영향 없음)."""
+    try:
+        with _search_db() as db:
+            db.execute("INSERT INTO lines (meeting_id, text) VALUES (?, ?)", (meeting_id, text))
+            db.execute(
+                "INSERT INTO idx_state (meeting_id, n) VALUES (?, 1) "
+                "ON CONFLICT(meeting_id) DO UPDATE SET n = n + 1",
+                (meeting_id,),
+            )
+    except Exception:  # noqa: BLE001 — 인덱스는 보조 — 검색 시 백필로 복구된다
+        pass
+
+
+def _fts_replace(meeting_id: str, old_text: str, new_text: str) -> None:
+    try:
+        with _search_db() as db:
+            db.execute(
+                "DELETE FROM lines WHERE rowid IN "
+                "(SELECT rowid FROM lines WHERE meeting_id = ? AND text = ? LIMIT 1)",
+                (meeting_id, old_text),
+            )
+            db.execute("INSERT INTO lines (meeting_id, text) VALUES (?, ?)", (meeting_id, new_text))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _fts_drop(meeting_id: str) -> None:
+    try:
+        with _search_db() as db:
+            db.execute("DELETE FROM lines WHERE meeting_id = ?", (meeting_id,))
+            db.execute("DELETE FROM idx_state WHERE meeting_id = ?", (meeting_id,))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _fts_backfill(db: sqlite3.Connection) -> None:
+    """인덱스가 비거나 뒤처진 회의만 증분 색인(기존 회의·인덱스 유실 복구)."""
+    state = dict(db.execute("SELECT meeting_id, n FROM idx_state").fetchall())
+    for folder in meetings_dir().iterdir():
+        if not folder.is_dir():
+            continue
+        mid = folder.name
+        lines = read_transcript(mid)
+        done = int(state.get(mid, 0))
+        if len(lines) <= done:
+            continue
+        for item in lines[done:]:
+            txt = (item.get("text") or "").strip()
+            if txt:
+                db.execute("INSERT INTO lines (meeting_id, text) VALUES (?, ?)", (mid, txt))
+        db.execute(
+            "INSERT INTO idx_state (meeting_id, n) VALUES (?, ?) "
+            "ON CONFLICT(meeting_id) DO UPDATE SET n = ?",
+            (mid, len(lines), len(lines)),
+        )
+
+
+def _search_meetings_fts(q: str, limit: int) -> Optional[List[dict]]:
+    """FTS5 검색. 실패(손상 등)·짧은 질의(trigram 최소 3자) 시 None → 풀스캔 폴백."""
+    if len(q) < 3:
+        return None
+    try:
+        with _LOCK, _search_db() as db:
+            _fts_backfill(db)
+            match = '"' + q.replace('"', '""') + '"'
+            # snippet()은 집계와 함께 못 쓴다 → rank순으로 받아 파이썬에서 회의별 첫(최적) 매치만 취한다.
+            rows = db.execute(
+                "SELECT meeting_id, snippet(lines, 1, '', '', '…', 14) AS snip "
+                "FROM lines WHERE lines MATCH ? ORDER BY rank LIMIT ?",
+                (match, limit * 6),
+            ).fetchall()
+    except Exception:  # noqa: BLE001
+        return None
+    hits: List[dict] = []
+    seen: set = set()
+    for mid, snip in rows:
+        if mid in seen:
+            continue
+        meta = get_meta(mid)
+        if meta is None:
+            continue
+        seen.add(mid)
+        hits.append({
+            "id": mid,
+            "title": meta.get("title", mid),
+            "started_at": meta.get("started_at"),
+            "snippet": snip,
+        })
+        if len(hits) >= limit:
+            return hits
+    # 제목·요약·결정(메타)은 FTS 밖 — 가볍게 보충 매치.
+    ql = q.lower()
+    for folder in sorted(meetings_dir().iterdir(), reverse=True):
+        if not folder.is_dir() or folder.name in seen:
+            continue
+        meta = _read_json(folder / "meeting.json")
+        if meta is None:
+            continue
+        hay = " ".join([str(meta.get("title", "")), str(meta.get("summary", "")),
+                        " ".join(str(d) for d in meta.get("decisions", []))]).lower()
+        if ql in hay:
+            hits.append({"id": meta.get("id", folder.name), "title": meta.get("title", folder.name),
+                         "started_at": meta.get("started_at"), "snippet": str(meta.get("summary", ""))[:120]})
+            if len(hits) >= limit:
+                break
+    return hits
+
+
+def search_meetings(query: str, limit: int = 20) -> List[dict]:
+    """전체 회의의 전사·제목·요약·결정에서 query 검색. MCP search_meeting용.
+
+    FTS5 인덱스(증분·백필)를 우선 사용 — 회의가 수백 건이어도 풀스캔 없이 즉시.
+    인덱스 실패 시에만 기존 substring 풀스캔으로 폴백.
+    """
+    q = (query or "").strip()
     if not q:
         return []
+    fts = _search_meetings_fts(q, limit)
+    if fts is not None:
+        return fts
+    return _search_meetings_scan(q.lower(), limit)
+
+
+def _search_meetings_scan(q: str, limit: int = 20) -> List[dict]:
+    """레거시 substring 풀스캔(FTS 폴백)."""
     hits: List[dict] = []
     for folder in sorted(meetings_dir().iterdir(), reverse=True):
         if not folder.is_dir():

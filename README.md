@@ -10,6 +10,8 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-111.svg)
 ![Status](https://img.shields.io/badge/status-alpha-888.svg)
 
+**[소개 사이트](https://harrykane11.github.io/ghost/)** · **[다운로드 (Releases)](https://github.com/HarryKane11/ghost/releases)**
+
 </div>
 
 ---

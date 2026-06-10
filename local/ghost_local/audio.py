@@ -38,45 +38,78 @@ def _to_wav16k(src: str) -> str:
     return dst
 
 
-# ── ElevenLabs Scribe: 단어 타임스탬프 → 문장 세그먼트 ────────────────────────
+# ── ElevenLabs Scribe: 단어 타임스탬프(+화자 분리) → 문장 세그먼트 ────────────
 def _eleven_segments(path: str, lang: Optional[str], key: str) -> List[Segment]:
     import httpx
     from ghost_local import stt_cloud
-    data = {"model_id": "scribe_v2", "timestamps_granularity": "word"}
+    # diarize=true → 각 단어에 speaker_id가 붙는다(Scribe 내장 화자 분리).
+    data = {"model_id": "scribe_v2", "timestamps_granularity": "word", "diarize": "true"}
     code = {"ko": "ko", "en": "en", "zh": "zh"}.get(lang or "")
     if code:
         data["language_code"] = code
-    with open(path, "rb") as f:
-        r = httpx.post(stt_cloud.ELEVEN_URL, headers={"xi-api-key": key},
-                       data=data, files={"file": ("audio.wav", f, "audio/wav")}, timeout=600)
+
+    def _post(payload: dict) -> httpx.Response:
+        with open(path, "rb") as f:
+            return httpx.post(stt_cloud.ELEVEN_URL, headers={"xi-api-key": key},
+                              data=payload, files={"file": ("audio.wav", f, "audio/wav")}, timeout=600)
+
+    r = _post(data)
+    if r.status_code >= 400:
+        # diarize 미지원(플랜/버전)이어도 전사는 살린다.
+        r = _post({k: v for k, v in data.items() if k != "diarize"})
     r.raise_for_status()
     j = r.json()
     words = j.get("words") or []
     if not words:
         text = (j.get("text") or "").strip()
         return [{"start": 0.0, "end": _duration(path), "text": text}] if text else []
-    # 단어들을 문장 경계(.?!。…) 또는 ~10초 단위로 묶는다.
+    # 단어들을 화자 전환 / 문장 경계(.?!。…) / ~10초 단위로 묶는다.
+    speaker_no: dict = {}   # speaker_id → 등장 순서(1부터)
+
+    def _spk(w: dict) -> Optional[int]:
+        sid = w.get("speaker_id")
+        if not sid:
+            return None
+        if sid not in speaker_no:
+            speaker_no[sid] = len(speaker_no) + 1
+        return speaker_no[sid]
+
     segs: List[Segment] = []
     cur: List[str] = []
     seg_start: Optional[float] = None
+    seg_speaker: Optional[int] = None
     last_end = 0.0
+
+    def _flush(end: float) -> None:
+        nonlocal cur, seg_start, seg_speaker
+        joined = "".join(cur).strip()
+        if joined and seg_start is not None:
+            seg: Segment = {"start": round(seg_start, 2), "end": round(end, 2), "text": joined}
+            if seg_speaker is not None:
+                seg["speaker"] = seg_speaker
+            segs.append(seg)
+        cur, seg_start, seg_speaker = [], None, None
+
     for w in words:
         if w.get("type") not in (None, "word", "spacing"):
             continue
         txt = w.get("text") or ""
         st = float(w.get("start") or last_end)
         en = float(w.get("end") or st)
+        spk = _spk(w)
+        # 화자가 바뀌면 먼저 끊는다(누가 말했는지가 세그먼트의 단위).
+        if spk is not None and seg_speaker is not None and spk != seg_speaker and "".join(cur).strip():
+            _flush(last_end)
         last_end = en
         if seg_start is None:
             seg_start = st
+        if seg_speaker is None:
+            seg_speaker = spk
         cur.append(txt)
-        joined = "".join(cur).strip()
         ends_sentence = txt.strip().endswith((".", "?", "!", "。", "…", "?", "!"))
-        if joined and (ends_sentence or (en - seg_start) >= 10.0):
-            segs.append({"start": round(seg_start, 2), "end": round(en, 2), "text": joined})
-            cur, seg_start = [], None
-    if cur and seg_start is not None:
-        segs.append({"start": round(seg_start, 2), "end": round(last_end, 2), "text": "".join(cur).strip()})
+        if "".join(cur).strip() and (ends_sentence or (en - seg_start) >= 10.0):
+            _flush(en)
+    _flush(last_end)
     return [s for s in segs if s["text"]]
 
 
