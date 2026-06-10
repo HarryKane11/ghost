@@ -934,20 +934,29 @@ def minutes_stream(transcript: str, cfg: Optional[BrainConfig] = None, context: 
     system = system or MINUTES_SYSTEM
     ctx_block = (f"[회의 배경(사용자 제공) — 고유명사·맥락 참고]\n{context}\n\n" if context.strip() else "")
     user_input = f"{ctx_block}[회의 전사 전체]\n{transcript}"
+    query = "아래 회의 전사를 처음부터 끝까지 이해한 뒤, 주제별로 상세 회의록을 작성해줘."
 
-    def _make() -> dict:
-        return act("아래 회의 전사를 처음부터 끝까지 이해한 뒤, 주제별로 상세 회의록을 작성해줘.",
-                   user_input, cfg, system)
-
-    # 1) 구조화 회의록(요약·논의·결정·액션) — 먼저 빠르게 내보낸다(이미지 기다리다 타임아웃 방지).
+    # 1) 구조화 회의록 — act_stream을 그대로 흘려보내 codex의 중간 과정(웹검색·커넥터·명령)이
+    #    카드에 실시간 표시된다. (이전엔 블로킹 act()라 '정리 중…' 한 줄만 보였다.)
     yield ("progress", "회의록 정리 중…")
-    spec = _make()
+    spec: Optional[dict] = None
+    for kind, payload in act_stream(query, user_input, cfg, system):
+        if kind == "progress":
+            yield ("progress", payload)
+        elif kind == "result":
+            spec = payload
     if not _spec_has_content(spec):
         # 일시 오류(토큰 레이스·타임아웃 등)로 빈 회의록이 나오면 한 번 재시도 — 빈 minutes.json 저장 방지.
         yield ("progress", "회의록이 비어 다시 정리 중…")
-        retry = _make()
+        retry: Optional[dict] = None
+        for kind, payload in act_stream(query, user_input, cfg, system):
+            if kind == "progress":
+                yield ("progress", payload)
+            elif kind == "result":
+                retry = payload
         if _spec_has_content(retry):
             spec = retry
+    spec = spec if isinstance(spec, dict) else {}
     spec["title"] = spec.get("title") or "회의록"
     yield ("result", spec)  # ← 텍스트 회의록 먼저 표시(클라이언트 타임아웃 해제)
 

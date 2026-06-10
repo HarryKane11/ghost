@@ -143,8 +143,9 @@ function UnclearChip({ heard, guess, onConfirm, onSkip, t }: {
 
 const GHOST_KEYS = ["ghost.l0", "ghost.l1", "ghost.l2", "ghost.l3", "ghost.l4", "ghost.l5", "ghost.l6"];
 
-/** 유령다운 로딩 문장 롤링. */
-function GhostLoader() {
+/** 스트리밍 로더 — 유령이 카드 위를 가로질러 날아다니며 일하는 중임을 보여준다.
+ * 메시지 롤링만 있던 이전 버전보다 '살아 있는' 느낌. 트랙 위 트레일이 유령을 따라간다. */
+function GhostStreamLoader() {
   const { t } = useT();
   const [i, setI] = useState(0);
   useEffect(() => {
@@ -152,9 +153,17 @@ function GhostLoader() {
     return () => clearInterval(id);
   }, []);
   return (
-    <div className="flex items-center gap-2 text-[12px] italic text-steel">
-      <span className="soul-pulse size-1.5 shrink-0 rounded-full bg-spark" />
-      <span key={i} className="wisp">{t(GHOST_KEYS[i])}</span>
+    <div className="space-y-1.5">
+      <div className="relative h-9 overflow-hidden rounded-xl border border-hairline/50 bg-surface-soft/40">
+        <div className="ghost-stream-trail absolute inset-y-0 w-28" />
+        <span className="phantom-fly text-spark-deep" style={{ ["--fly-dur" as any]: "2.8s" }}>
+          <GhostLogo variant="mark" size={18} />
+        </span>
+      </div>
+      <div className="flex items-center gap-2 px-0.5 text-[12px] italic text-steel">
+        <span className="soul-pulse size-1.5 shrink-0 rounded-full bg-spark" />
+        <span key={i} className="wisp">{t(GHOST_KEYS[i])}</span>
+      </div>
     </div>
   );
 }
@@ -307,6 +316,13 @@ export default function App() {
     }
   }, [pushFeed, t]);
   useEffect(() => { loadRecentMeetings(); }, [loadRecentMeetings]);
+  // 회의 내역이 비어 있으면 백엔드가 늦게 떠도 채워질 때까지 재시도 —
+  // 패키징 앱은 백엔드 부팅이 렌더러보다 늦어, 1회 로드만으로는 영영 빈 사이드바가 됐다.
+  useEffect(() => {
+    if (recentMeetings.length) return;
+    const id = setInterval(loadRecentMeetings, 4000);
+    return () => clearInterval(id);
+  }, [recentMeetings.length, loadRecentMeetings]);
   // 디스플레이 모드 → Electron 창 크기/always-on-top 동기화 + 번역 언어 목록
   // (창 자동 리사이즈 제거 — 모드 전환은 레이아웃만 바꾼다. assist 눌렀을 때 창이 작아지던 문제 해결)
   // 번역 언어 목록 — 첫 실행엔 백엔드가 늦게 떠 빈 배열이 올 수 있어, 채워질 때까지 재시도.
@@ -511,7 +527,7 @@ export default function App() {
             const idx = x.progress.findIndex((q) => q.id === p.id);
             if (idx >= 0) { const next = x.progress.slice(); next[idx] = p; return { ...x, progress: next }; }
           }
-          return { ...x, progress: [...x.progress, p].slice(-8) };
+          return { ...x, progress: [...x.progress, p].slice(-12) };   // 회의록 경로도 codex 단계가 흐르므로 여유 있게
         })),
         onResult: (spec, backend) => {
           clearTimeout(timer);
@@ -697,7 +713,7 @@ export default function App() {
     if (active) {
       setActive(false); stop(); setDraft("");
       const mid = meetingIdRef.current;
-      if (mid) api.endMeeting(mid);   // 종료 표시(폴더는 유지)
+      if (mid) api.endMeeting(mid).then(loadRecentMeetings);   // 종료 표시 + 내역 갱신
       return;
     }
     try {
@@ -706,7 +722,7 @@ export default function App() {
       }
       // 새 회의 시작 → 일시 폴더 생성. 전사·요약·회의록이 여기 누적된다.
       liveCardRef.current = 0; digestTextRef.current = ""; digestBusyRef.current = false;
-      try { const m = await api.startMeeting(); meetingIdRef.current = m.id; setMeetingTitle(m.title); setMeetingFolder(m.folder || ""); }
+      try { const m = await api.startMeeting(); meetingIdRef.current = m.id; setMeetingTitle(m.title); setMeetingFolder(m.folder || ""); loadRecentMeetings(); }
       catch { meetingIdRef.current = ""; }
       setActive(true);
       // 스트리밍 경로를 '시작 시점에' 백엔드에 직접 물어 권위 있게 결정(옛 ref 의존 X).
@@ -732,7 +748,7 @@ export default function App() {
       );
     }
     catch (e) { setActive(false); flash(t(captureErrKey(e))); }
-  }, [active, start, stop, onUtterance, onInterim, onCommitted, source, micId, t]);
+  }, [active, start, stop, onUtterance, onInterim, onCommitted, source, micId, t, loadRecentMeetings]);
 
   // 런처에서 모드 선택 → 진입. 워치는 시스템 오디오로 듣는다.
   const enterMode = useCallback((m: LaunchMode) => {
@@ -1282,7 +1298,7 @@ export default function App() {
                   {it.status === "working" ? (
                     <div className="relative space-y-3 py-1">
                       {it.ack && <p className="wisp text-[13px] italic leading-relaxed text-steel">{it.ack}</p>}
-                      <GhostLoader />
+                      <GhostStreamLoader />
                       <div className="space-y-1.5">
                         {it.progress.map((p, i) => {
                           const last = i === it.progress.length - 1;
