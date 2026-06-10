@@ -1,0 +1,38 @@
+name: Release
+
+# 태그(v*)를 푸시하면 macOS DMG를 빌드해 GitHub Release에 첨부한다.
+#   git tag v0.3.0 && git push origin v0.3.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    name: macOS DMG (arm64)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@v5   # prepare-runtime이 uv 바이너리를 동봉한다
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm dist
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true   # 릴리즈 노트 검토 후 수동 공개
+          files: |
+            desktop/release/Ghost-*.dmg
+            desktop/release/Ghost-*.dmg.blockmap
