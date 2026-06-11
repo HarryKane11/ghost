@@ -15,7 +15,7 @@ const fmt = (s: number) => {
 type Phase = "empty" | "transcribing" | "ready" | "error";
 
 // 화자 칩 팔레트(화자 번호 → 색, 순환)
-const SPK_COLORS = ["#0a7ea4", "#b06a00", "#6b8af0", "#00b48a", "#d05757", "#8a5ad0"];
+const SPK_COLORS = ["#0a7ea4", "#b06a00", "#6b8af0", "#7c3aed", "#d05757", "#00b48a"];
 
 /**
  * 음성 파일 업로드 모드 — 설정된 ASR로 타임스탬프 전사 + 오디오 재생 + AI 회의록(구간 재생 주석).
