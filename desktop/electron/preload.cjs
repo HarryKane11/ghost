@@ -1,10 +1,17 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-let version = "0.1.0";
-try { version = require("../package.json").version || version; } catch { /* ignore */ }
+// 앱 버전은 메인 프로세스가 argv(--ghost-version=...)로 주입한다. 패키징 앱의 preload는
+// 샌드박스라 require("../package.json")이 실패해 버전이 폴백(0.1.0)으로 남았고,
+// GitHub 최신 릴리즈가 항상 '더 새 버전'으로 판정돼 업데이트 칩이 영구 표시됐다.
+const argOf = (name) => (process.argv.find((a) => a.startsWith(`--${name}=`)) || "").split("=")[1] || "";
+let version = argOf("ghost-version");
+if (!version) {
+  try { version = require("../package.json").version; } catch { /* sandboxed */ }
+}
+version = version || "0.1.0";
 
 // 메인 프로세스가 발급한 API 토큰(--ghost-token=...) — 렌더러가 모든 백엔드 요청에 동봉.
-const token = (process.argv.find((a) => a.startsWith("--ghost-token=")) || "").split("=")[1] || "";
+const token = argOf("ghost-token");
 
 // 렌더러는 백엔드를 HTTP(localhost:8765)로 직접 호출하므로 별도 브리지는 최소화.
 contextBridge.exposeInMainWorld("ghost", {

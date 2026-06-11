@@ -232,9 +232,12 @@ CODEX_MODELS = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-
 REASONING_EFFORTS = ["low", "medium", "high"]
 
 
-@app.on_event("startup")
-def _prewarm() -> None:
-    """앱 시작 시 STT 모델을 백그라운드로 미리 로드 (첫 전사 24초 지연 제거)."""
+def _recheck_stt() -> None:
+    """STT 준비 상태를 재평가하고 가능하면 모델을 미리 로드(백그라운드).
+
+    시작 시 1회만 평가하던 이전 구조에선 인앱 엔진 설치·모델 다운로드가 끝나도
+    재시작 전까지 stt_ready가 False로 남았다. 설치/다운로드/전환 완료 시마다 호출한다.
+    """
     def _w():
         # 클라우드 STT는 로컬 모델 로드가 불필요 → 즉시 ready (가벼운 기본 경로).
         if STATE.get("stt_provider") == "elevenlabs":
@@ -244,7 +247,13 @@ def _prewarm() -> None:
         # 로컬 STT 엔진(mlx 등)이 설치돼 있을 때만 warmup. 미설치면 설치 안내.
         if not stt.engine_available(stt._engine(stt.active_model())):
             STATE["stt_ready"] = False
-            STATE["stt_error"] = "로컬 STT 미설치 — `uv sync --extra local`"
+            STATE["stt_error"] = "로컬 STT 미설치 — 설정 > 음성 인식에서 '앱에서 설치'"
+            return
+        # 모델 미다운로드면 warmup을 걸지 않는다 — 모델 로드가 HF 다운로드를 암묵적으로
+        # 시작해 3GB+를 진행률 표시 없이 받게 되던 문제. 다운로드는 UI 버튼으로만.
+        if not stt.model_present():
+            STATE["stt_ready"] = False
+            STATE["stt_error"] = "모델 미다운로드 — 설정 > 음성 인식에서 다운로드"
             return
         try:
             stt.warmup()
@@ -254,6 +263,12 @@ def _prewarm() -> None:
             STATE["stt_ready"] = False
             STATE["stt_error"] = str(ex)
     threading.Thread(target=_w, daemon=True).start()
+
+
+@app.on_event("startup")
+def _prewarm() -> None:
+    """앱 시작 시 STT 준비 상태 평가 + 모델 프리로드 (첫 전사 24초 지연 제거)."""
+    _recheck_stt()
 
 
 def _codex_logged_in() -> bool:
@@ -296,6 +311,7 @@ def set_stt(req: SttReq) -> dict:
     """STT 제공자 전환 (local|elevenlabs)."""
     if req.provider in STT_PROVIDERS:
         STATE["stt_provider"] = req.provider
+        _recheck_stt()   # 전환 즉시 준비 상태 재평가(local ↔ cloud)
     return {"ok": True, "stt_provider": STATE["stt_provider"]}
 
 
@@ -700,8 +716,8 @@ def stt_model_status() -> dict:
 
 @app.post("/api/stt/model/download")
 def stt_model_download() -> dict:
-    """현재 로컬 ASR 모델 다운로드 시작(백그라운드, 재개 가능)."""
-    return stt.start_download()
+    """현재 로컬 ASR 모델 다운로드 시작(백그라운드, 재개 가능). 완료 시 stt_ready 재평가."""
+    return stt.start_download(on_done=_recheck_stt)
 
 
 # 인터뷰 모드 번역 대상 언어.
@@ -861,8 +877,8 @@ class EngineInstallReq(BaseModel):
 
 @app.post("/api/stt/engine/install")
 def stt_engine_install(req: EngineInstallReq) -> dict:
-    """터미널 없이 앱에서 옵셔널 엔진 설치(로컬 STT·스트리밍·TTS 등)."""
-    return stt.install_engine(req.target)
+    """터미널 없이 앱에서 옵셔널 엔진 설치(로컬 STT·스트리밍·TTS 등). 완료 시 stt_ready 재평가."""
+    return stt.install_engine(req.target, on_done=_recheck_stt)
 
 
 @app.get("/api/stt/engine/install")
@@ -933,7 +949,9 @@ def stt_select(req: SttSelectReq) -> dict:
     """로컬/클라우드 STT 모델 선택. 로컬은 커스텀 HF repo도 허용."""
     if req.kind == "cloud":
         return {"ok": True, "kind": "cloud", "model": stt_cloud.set_model(req.model_id)}
-    return {"ok": True, "kind": "local", "model": stt.set_model(req.model_id)}
+    out = {"ok": True, "kind": "local", "model": stt.set_model(req.model_id)}
+    _recheck_stt()   # 모델 교체 즉시 준비 상태 재평가(미설치/미다운로드 안내 갱신)
+    return out
 
 
 # ── STT ─────────────────────────────────────────────────────────────────────

@@ -11,7 +11,25 @@ const TOGGLE_SHORTCUT = "CommandOrControl+Shift+G";
 // API 토큰: 앱이 발급해 백엔드(env)와 렌더러(preload argv)에 같이 꽂는다.
 // 브라우저의 임의 사이트가 localhost:8765로 회의 전사를 읽어가는 것을 차단.
 // 개발 모드(수동 uvicorn)는 백엔드에 GHOST_TOKEN이 없으므로 인증이 강제되지 않는다.
-const GHOST_TOKEN = crypto.randomBytes(24).toString("hex");
+// 토큰은 설치 단위로 userData에 영속한다 — 실행마다 재발급하면 이전 실행의 백엔드가
+// 포트에 살아남았을 때(자식 uvicorn이 kill을 비껴간 경우) health/버전은 정상이라 재사용되는데
+// 토큰만 어긋나 모든 요청이 401 → 재시작 후 '백엔드 끊김'으로 보였다.
+function loadOrCreateToken() {
+  try {
+    const p = path.join(app.getPath("userData"), "api-token");
+    try {
+      const t = fs.readFileSync(p, "utf8").trim();
+      if (/^[0-9a-f]{32,}$/.test(t)) return t;
+    } catch { /* first run */ }
+    const t = crypto.randomBytes(24).toString("hex");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, t, { mode: 0o600 });
+    return t;
+  } catch {
+    return crypto.randomBytes(24).toString("hex");   // userData 접근 불가 시 세션 한정 토큰
+  }
+}
+const GHOST_TOKEN = loadOrCreateToken();
 let backendProc = null;
 let win = null;
 let tray = null;
@@ -94,6 +112,18 @@ function backendAlive() {
   });
 }
 
+/** 기존 백엔드가 '내 토큰'을 받아주는지(인증 포함) 확인. health는 토큰 예외라 따로 본다. */
+function backendAuthOk() {
+  return new Promise((resolve) => {
+    const req = http.get(
+      { host: "127.0.0.1", port: BACKEND_PORT, path: "/api/status", timeout: 1500, headers: { "x-ghost-token": GHOST_TOKEN } },
+      (res) => { res.resume(); resolve(res.statusCode === 200); }
+    );
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => { req.destroy(); resolve(false); });
+  });
+}
+
 /** 포트를 점유한 '옛/외부' 고스트 백엔드를 회수(종료). best-effort. */
 function reclaimPort() {
   return new Promise((resolve) => {
@@ -117,6 +147,10 @@ const _MIME = {
   ".jpeg": "image/jpeg", ".gif": "image/gif", ".ico": "image/x-icon", ".json": "application/json",
   ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".map": "application/json", ".webmanifest": "application/manifest+json",
 };
+// 렌더러 포트는 고정 후보를 순서대로 시도한다. 임의 포트(listen 0)는 실행마다 origin이
+// 바뀌어 localStorage(온보딩 완료 플래그·테마·언어 등)가 매번 초기화됐다 — 가이드가
+// 재실행 때마다 다시 뜨던 원인. 고정 포트가 전부 점유된 경우에만 임시 포트로 폴백.
+const RENDERER_PORTS = [8766, 8767, 8768];
 function startRendererServer() {
   if (rendererBase) return Promise.resolve(rendererBase);
   const dir = path.join(__dirname, "..", "dist");
@@ -140,8 +174,14 @@ function startRendererServer() {
         });
       } catch { res.statusCode = 500; res.end(); }
     });
-    srv.on("error", () => resolve(null));
-    srv.listen(0, "127.0.0.1", () => { rendererBase = `http://127.0.0.1:${srv.address().port}`; resolve(rendererBase); });
+    const ports = [...RENDERER_PORTS, 0];
+    const tryNext = () => {
+      const p = ports.shift();
+      if (p === undefined) return resolve(null);
+      srv.once("error", (e) => { if (e && e.code === "EADDRINUSE") tryNext(); else resolve(null); });
+      srv.listen(p, "127.0.0.1", () => { rendererBase = `http://127.0.0.1:${srv.address().port}`; resolve(rendererBase); });
+    };
+    tryNext();
   });
 }
 
@@ -172,9 +212,10 @@ async function ensureBackend() {
   if (ver !== null) {
     // 개발 모드는 개발자가 띄운 백엔드를 그대로 쓴다(버전 강제 X).
     if (!app.isPackaged) return;
-    // 패키징 모드: 내 빌드의 백엔드면 재사용, 아니면(옛/외부 백엔드가 포트 점유) 회수 후 내 것 기동.
-    if (ver === expectedBuild()) return;
-    console.error(`[backend] foreign/old backend on ${BACKEND_PORT} (version=${ver}, expected=${expectedBuild()}) → reclaiming`);
+    // 패키징 모드: 내 빌드 + 내 토큰을 받아주는 백엔드만 재사용(토큰은 userData에 영속이라
+    // 정상적으로 살아남은 백엔드는 통과한다). 버전이 다르거나 인증이 어긋나면 회수 후 재기동.
+    if (ver === expectedBuild() && await backendAuthOk()) return;
+    console.error(`[backend] stale/foreign backend on ${BACKEND_PORT} (version=${ver}, expected=${expectedBuild()}) → reclaiming`);
     await reclaimPort();
   }
   const env = backendEnv();
@@ -184,7 +225,9 @@ async function ensureBackend() {
   backendProc = spawn(
     uv,
     ["run", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", String(BACKEND_PORT), "--log-level", "warning"],
-    { cwd, stdio: "inherit", env }
+    // detached: POSIX에서 자기 프로세스 그룹을 만들어, 종료 시 uv의 자식(uvicorn)까지
+    // 그룹째 죽일 수 있게 한다(uv만 죽으면 uvicorn이 고아로 포트를 계속 점유).
+    { cwd, stdio: "inherit", env, detached: !IS_WIN }
   );
   backendProc.on("error", (e) => console.error("[backend] spawn failed:", e.message));
   // 첫 실행은 uv의 Python/의존성 다운로드로 1~수 분 걸릴 수 있음 → 넉넉히 대기.
@@ -211,7 +254,7 @@ async function createWindow() {
       nodeIntegration: false,
       // 오브 모드에서 창을 숨겨도 렌더러의 오디오 캡처·전사 루프가 멈추지 않게.
       backgroundThrottling: false,
-      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`],
+      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`, `--ghost-version=${expectedBuild()}`],
     },
   });
   win.once("ready-to-show", () => win.show());
@@ -264,7 +307,7 @@ async function createOrbWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
-      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`],
+      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`, `--ghost-version=${expectedBuild()}`],
     },
   });
   orb.setAlwaysOnTop(true, "floating");
@@ -397,6 +440,16 @@ app.on("will-quit", () => {
 });
 
 app.on("quit", () => {
-  if (backendProc) { try { backendProc.kill(); } catch {} }
+  if (backendProc) {
+    try {
+      if (IS_WIN) {
+        // /T: uv의 자식(uvicorn)까지 트리째 종료. 비동기 spawn은 앱 종료 전에 못 끝낼 수 있어 sync.
+        require("node:child_process").spawnSync("taskkill", ["/pid", String(backendProc.pid), "/T", "/F"], { windowsHide: true });
+      } else {
+        try { process.kill(-backendProc.pid, "SIGTERM"); }   // 프로세스 그룹째(uvicorn 포함) 종료
+        catch { backendProc.kill(); }
+      }
+    } catch { /* ignore */ }
+  }
   if (tray) { try { tray.destroy(); } catch {} }
 });
