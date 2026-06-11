@@ -3,7 +3,7 @@ import {
   Send, Volume2, VolumeX, Sun, Moon, X, RefreshCw, ShieldCheck, ShieldAlert,
   Mic, MonitorSpeaker, Loader2, Check, Settings, AudioLines, Square,
   HelpCircle, Download, Trash2, Play, Pin, Search, Globe, Terminal, Sparkles, ChevronDown, FileText, Copy,
-  Languages, Columns2, PanelRight, Home, History, MoreHorizontal, Ghost as GhostIcon,
+  Languages, Columns2, PanelRight, Home, History, MoreHorizontal, Ghost as GhostIcon, Pencil,
 } from "lucide-react";
 // (Languages 아이콘은 헤더 지구본 언어 피커에 사용)
 import { GhostLogo } from "@/components/GhostLogo";
@@ -229,6 +229,10 @@ export default function App() {
   const [ctxOpen, setCtxOpen] = useState(false);
   const [ctxText, setCtxText] = useState("");
   const [recentMeetings, setRecentMeetings] = useState<api.MeetingMeta[]>([]);
+  // 회의 내역 우클릭 메뉴(#12) — 이름 변경/삭제를 관리자 페이지 없이 바로.
+  const [histMenu, setHistMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
   const [histOpen, setHistOpen] = usePref("ghost.histSidebar", true);   // 좌측 회의 내역 사이드바
   const [atOpen, setAtOpen] = useState(false);  // @ 과거 회의 참조 드롭다운
   const [onboard, setOnboard] = useState(false);
@@ -292,7 +296,7 @@ export default function App() {
   const liveCardRef = useRef(0);   // 마지막 실시간 카드 시각(쿨다운)
   const digestTextRef = useRef("");  // 최근 다이제스트 내용(실시간 카드 dedup용)
   const digestBusyRef = useRef(false);  // 다이제스트 진행 중 → 중복 생성 방지(pile-up)
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const demoTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const { start, stop, release, level, speaking } = useListening();
 
@@ -313,19 +317,39 @@ export default function App() {
   useEffect(() => { refreshStatus(); }, [refreshStatus]);
   // @ 참조용 최근 회의 목록 (메뉴 열 때·회의 종료 시 갱신)
   const loadRecentMeetings = useCallback(() => { api.getMeetings().then(setRecentMeetings).catch(() => {}); }, []);
-  // 회의 내역에서 한 건 열기 → 회의록(또는 요약) + 최근 다이제스트를 카드로 복원.
+  // 회의 내역에서 한 건 열기 → 그 회의의 세션(회의록 + 다이제스트 + 채팅 기록)으로 피드를 교체(#14).
+  // 이전엔 클릭마다 전역 피드에 append돼 회의별 대화를 구분해 볼 수 없었다.
   const openMeetingCard = useCallback(async (m: api.MeetingMeta) => {
     const full = await api.getMeeting(m.id);
     const spec = full?.minutes || { title: m.title, spoken: "", intent: "note",
       blocks: [{ type: "text", text: full?.summary || t("hist.noMinutes") }] };
-    pushFeed({ kind: "card", id: newId(), query: m.title, status: "done", progress: [], spec, pinned: true });
+    const items: FeedItem[] = [{ kind: "card", id: newId(), query: m.title, status: "done", progress: [], spec, pinned: true }];
     // 저장된 5분 다이제스트도 함께 복원(최근 2개) — 재시작 후에도 회의 흐름이 보인다.
     const digests = await api.getDigests(m.id);
     for (const d of digests.slice(-2)) {
-      if (d?.spec) pushFeed({ kind: "card", id: newId(), query: `${m.title} · ${t("digest.label")}`, status: "done", progress: [], spec: d.spec });
+      if (d?.spec) items.push({ kind: "card", id: newId(), query: `${m.title} · ${t("digest.label")}`, status: "done", progress: [], spec: d.spec });
     }
-  }, [pushFeed, t]);
+    // 그 회의에서 주고받은 질의응답 카드를 시간순으로 복원.
+    for (const c of await api.getMeetingCards(m.id)) {
+      if (!c?.spec) continue;
+      items.push({ kind: "user", id: newId(), text: c.query });
+      items.push({ kind: "card", id: newId(), query: c.query, ack: c.ack, status: "done", progress: [], spec: c.spec, backend: c.backend });
+    }
+    setFeed(items);
+  }, [t]);
   useEffect(() => { loadRecentMeetings(); }, [loadRecentMeetings]);
+  // 회의 삭제/이름 변경(#12) — 백엔드 반영 후 목록 즉시 갱신.
+  const deleteMeetingFromList = useCallback(async (id: string, title: string) => {
+    if (!window.confirm(t("settings.deleteConfirm", { title }))) return;
+    if (await api.deleteMeeting(id)) setRecentMeetings((l) => l.filter((x) => x.id !== id));
+    else flash(t("settings.deleteFail"));
+  }, [t]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const commitRename = useCallback(async (id: string) => {
+    const title = renameVal.trim();
+    setRenamingId(null);
+    if (!title) return;
+    if (await api.setMeetingTitle(id, title)) setRecentMeetings((l) => l.map((x) => (x.id === id ? { ...x, title } : x)));
+  }, [renameVal]);
   // 회의 내역이 비어 있으면 백엔드가 늦게 떠도 채워질 때까지 재시도 —
   // 패키징 앱은 백엔드 부팅이 렌더러보다 늦어, 1회 로드만으로는 영영 빈 사이드바가 됐다.
   useEffect(() => {
@@ -552,6 +576,9 @@ export default function App() {
           if (opts.dropIfEmpty && empty) setFeed((f) => f.filter((x) => !(x.kind === "card" && x.id === id)));
           else {
             updateCard(id, { status: "done", spec, backend });
+            // 회의 중 완료된 질의응답 카드는 회의에 저장(#14) — 회의 클릭 시 채팅 세션으로 복원.
+            // pinned(회의록·다이제스트)는 별도 파일로 이미 영속되므로 제외(복원 시 중복 방지).
+            if (!opts.pinned && meetingIdRef.current) void api.saveMeetingCard(meetingIdRef.current, { query: opts.query, ack: opts.ack || "", spec, backend: backend || "" });
             pushHistory(`Ghost[${spec?.title || ""}]: ${(spec?.spoken || blocks.find((b) => b.type === "text")?.text || "").slice(0, 180)}`);
             notify(spec?.title || "Ghost", spec?.spoken || t("notify.newCard"));
             // 플로팅 오브가 떠 있으면 — 회의 중 자기 생각을 밝히듯 말풍선으로 알린다.
@@ -1074,15 +1101,41 @@ export default function App() {
               {recentMeetings.length === 0 ? (
                 <p className="px-2 py-6 text-center text-[11.5px] leading-relaxed text-stone">{t("hist.empty")}</p>
               ) : recentMeetings.map((m) => (
-                <button key={m.id} onClick={() => openMeetingCard(m)}
-                  className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface">
-                  <span className="truncate text-[12.5px] text-charcoal">{m.title}</span>
-                  <span className="text-[10.5px] text-stone">{m.duration_sec ? t("hist.mins", { n: Math.max(1, Math.round(m.duration_sec / 60)) }) : t("hist.utts", { n: m.utterance_count ?? 0 })}{m.has_minutes ? ` · ${t("hist.minutesBadge")}` : ""}</span>
-                </button>
+                renamingId === m.id ? (
+                  <div key={m.id} className="px-1 py-1">
+                    <input autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) commitRename(m.id); if (e.key === "Escape") setRenamingId(null); }}
+                      onBlur={() => commitRename(m.id)}
+                      className="h-7 w-full rounded-md border border-hairline bg-canvas px-2 text-[12px] outline-none focus:border-ink/40" />
+                  </div>
+                ) : (
+                  <button key={m.id} onClick={() => openMeetingCard(m)}
+                    onContextMenu={(e) => { e.preventDefault(); setHistMenu({ id: m.id, title: m.title, x: e.clientX, y: e.clientY }); }}
+                    className="flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface">
+                    <span className="truncate text-[12.5px] text-charcoal">{m.title}</span>
+                    <span className="text-[10.5px] text-stone">{m.duration_sec ? t("hist.mins", { n: Math.max(1, Math.round(m.duration_sec / 60)) }) : t("hist.utts", { n: m.utterance_count ?? 0 })}{m.has_minutes ? ` · ${t("hist.minutesBadge")}` : ""}</span>
+                  </button>
+                )
               ))}
             </div>
           )}
         </aside>
+        {/* 회의 내역 우클릭 메뉴(#12) */}
+        {histMenu && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setHistMenu(null)} onContextMenu={(e) => { e.preventDefault(); setHistMenu(null); }} />
+            <div className="fixed z-50 w-44 rounded-xl border border-hairline bg-background p-1 shadow-lg" style={{ left: histMenu.x, top: histMenu.y }}>
+              <button onClick={() => { setRenamingId(histMenu.id); setRenameVal(histMenu.title); setHistMenu(null); }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-steel hover:bg-surface-soft">
+                <Pencil className="size-3.5 shrink-0 text-stone" /> {t("hist.rename")}
+              </button>
+              <button onClick={() => { const { id, title } = histMenu; setHistMenu(null); deleteMeetingFromList(id, title); }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-[#b04141] hover:bg-surface-soft">
+                <Trash2 className="size-3.5 shrink-0" /> {t("settings.deleteMeeting")}
+              </button>
+            </div>
+          </>
+        )}
         {/* 좌: 실시간 전사 (assist 모드에선 숨김) */}
         <section className={cn("flex min-h-0 flex-col border-r border-hairline", displayMode === "assist" && "hidden")}
           style={displayMode === "assist" ? undefined : { width: `${splitPct}%` }}>
@@ -1364,7 +1417,9 @@ export default function App() {
       </div>
 
       {/* 하단: 추천 프롬프트 칩 + 컴팩트 듣기 + 입력 (@로 지난 회의 참조) */}
-      <footer className="shrink-0 border-t border-hairline bg-surface-soft/50 px-4 py-2.5">
+      <footer className="relative shrink-0 border-t border-hairline bg-surface-soft/50 px-4 py-2.5">
+        {/* 앱 버전 — 메인 화면 하단에 항상 보이게(#16). Electron 밖(웹 dev)에선 숨김. */}
+        {g.version && <span className="pointer-events-none absolute bottom-1 right-2 text-[9.5px] tabular-nums text-stone/70">v{g.version}</span>}
         <div className="mx-auto max-w-3xl">
           {/* 추천 프롬프트 칩 (Ask 패널) */}
           {!thinking && (
@@ -1402,11 +1457,13 @@ export default function App() {
                 </div>
               </>
             )}
-            <form onSubmit={(e) => { e.preventDefault(); runManual(input); setInput(""); setAtOpen(false); }} className="flex flex-1 items-center gap-2">
-              <input ref={inputRef} value={input}
-                onChange={(e) => { const v = e.target.value; setInput(v); setAtOpen(/@(\S*)$/.test(v)); }}
+            <form onSubmit={(e) => { e.preventDefault(); if (!input.trim()) return; runManual(input); setInput(""); setAtOpen(false); if (inputRef.current) inputRef.current.style.height = "auto"; }} className="flex flex-1 items-end gap-2">
+              {/* 멀티라인 입력(#13) — Enter 전송, Shift+Enter 줄바꿈. isComposing 가드로 한글 조합 중 전송 방지. */}
+              <textarea ref={inputRef} value={input} rows={1}
+                onChange={(e) => { const v = e.target.value; setInput(v); setAtOpen(/@(\S*)$/.test(v)); const el = e.target; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
                 placeholder={t("footer.placeholder")}
-                className="h-10 flex-1 rounded-full border border-hairline bg-canvas px-4 text-[14px] outline-none placeholder:text-stone focus:border-ink/40" />
+                className="max-h-[120px] min-h-10 flex-1 resize-none rounded-2xl border border-hairline bg-canvas px-4 py-2.5 text-[14px] leading-snug outline-none placeholder:text-stone focus:border-ink/40" />
               <button type="submit" disabled={!input.trim()} className="grid size-10 shrink-0 place-items-center rounded-full bg-ink text-canvas disabled:opacity-40"><Send className="size-4" /></button>
             </form>
           </div>

@@ -6,7 +6,8 @@
     ├── transcript.jsonl 발화마다 실시간 append: {"t": ISO8601, "text": str, "source": str}
     ├── minutes.json     최종 회의록 spec (생성 시)
     ├── minutes.png      손글씨 회의록 (선택)
-    └── digests.jsonl    5분 다이제스트 카드 누적 (선택)
+    ├── digests.jsonl    5분 다이제스트 카드 누적 (선택)
+    └── cards.jsonl      질의응답 카드 누적 — 회의별 채팅 세션 (선택)
 
 폴더명(=id)은 시작 일시로 고정한다. 제목이 바뀌어도 폴더는 리네임하지 않는다.
 별도 DB 없이 폴더 자체가 저장소다(재시작 생존). MCP 서버가 이 저장소 전체를 읽는다.
@@ -431,6 +432,34 @@ def append_digest(meeting_id: str, spec: dict) -> None:
 def read_digests(meeting_id: str) -> List[dict]:
     """저장된 5분 다이제스트 기록 [{t, spec}] — 재시작 후에도 UI가 복원할 수 있게."""
     path = _meeting_path(meeting_id) / "digests.jsonl"
+    if not path.exists():
+        return []
+    out: List[dict] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if raw:
+            try:
+                out.append(json.loads(raw))
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
+def append_card(meeting_id: str, card: dict) -> bool:
+    """완료된 질의응답 카드를 회의 폴더에 누적(cards.jsonl) — 회의별 채팅 세션 복원용."""
+    with _LOCK:
+        folder = _meeting_path(meeting_id)
+        if not folder.exists():
+            return False
+        rec = {"t": _now_iso(), **card}
+        with open(folder / "cards.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return True
+
+
+def read_cards(meeting_id: str) -> List[dict]:
+    """저장된 질의응답 카드 [{t, query, ack, spec, backend}] — 회의 클릭 시 채팅 세션 복원."""
+    path = _meeting_path(meeting_id) / "cards.jsonl"
     if not path.exists():
         return []
     out: List[dict] = []
