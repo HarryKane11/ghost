@@ -209,13 +209,25 @@ export function SettingsMenu({
     setEngineInstall(await api.installEngine(target));
   };
   // 설치 중이면 진행 폴링 → 완료 시 상태 새로고침.
+  // 'local' 엔진 설치가 끝나면 모델이 없을 때 다운로드를 바로 이어 시작한다 —
+  // 이전엔 설치 완료 후 사용자가 다운로드 버튼을 또 찾아 눌러야 해 흐름이 끊겼다.
   useEffect(() => {
     if (!open || engineInstall.state !== "installing") return;
     const id = setInterval(async () => {
       try {
         const s = await api.getEngineInstall();
         setEngineInstall(s);
-        if (s.state === "done" || s.state === "error") { clearInterval(id); if (s.state === "done") refreshSttState(); }
+        if (s.state === "done" || s.state === "error") {
+          clearInterval(id);
+          if (s.state === "done") {
+            refreshSttState();
+            if (s.target === "local") {
+              const m = await api.getSttModel();
+              if (m && !m.present && m.state !== "downloading") setSttModel(await api.downloadSttModel());
+              else if (m) setSttModel(m);
+            }
+          }
+        }
       } catch { /* 일시 네트워크 오류 — 다음 폴링에서 재시도 */ }
     }, 2500);
     return () => clearInterval(id);
@@ -528,9 +540,15 @@ export function SettingsMenu({
                       <div className="mt-1 text-[11px] text-stone">{t("settings.modelDownloading")} {gb(sttModel.downloaded)} / {gb(sttModel.total)} ({sttModel.percent}%)</div>
                     </div>
                   ) : (
-                    <button onClick={downloadModel} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-medium text-canvas">
-                      <Download className="size-3.5" /> {t("settings.modelDownload")} (~{gb(sttModel.total)})
-                    </button>
+                    <div>
+                      <button onClick={downloadModel} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-medium text-canvas">
+                        <Download className="size-3.5" /> {sttModel.state === "error" ? t("settings.retry") : t("settings.modelDownload")} (~{gb(sttModel.total)})
+                      </button>
+                      {/* 다운로드 실패가 조용히 버튼으로 되돌아가던 문제 — 원인을 보여준다 */}
+                      {sttModel.state === "error" && sttModel.error && (
+                        <div className="mt-1 text-[11px] text-[#b04141]">{t("settings.modelDlFailed")} — {sttModel.error}</div>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -836,13 +854,29 @@ export function SettingsMenu({
 /** 앱에서 바로 옵셔널 엔진 설치(터미널 불필요). 전역 1개씩 — 설치 중이면 진행 표시. */
 function InstallBtn({ target, state, onInstall, t }: { target: string; state: api.EngineInstall; onInstall: (target: string) => void; t: (k: string) => string }) {
   const installingThis = state.state === "installing" && state.target === target;
+  const errorThis = state.state === "error" && state.target === target;
   const anyInstalling = state.state === "installing";
-  if (installingThis) return <span className="inline-flex items-center gap-1 text-spark-deep"><Loader2 className="size-3 animate-spin" /> {t("settings.installing")}</span>;
+  if (installingThis) {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5 text-spark-deep">
+        <Loader2 className="size-3 shrink-0 animate-spin" /> {t("settings.installing")}
+        {/* uv 출력 마지막 줄 — 수 분짜리 다운로드 동안 뭘 하는지 보여준다 */}
+        {state.detail && <span className="max-w-48 truncate font-mono text-[10px] text-stone" title={state.detail}>{state.detail}</span>}
+      </span>
+    );
+  }
   return (
-    <button onClick={() => onInstall(target)} disabled={anyInstalling}
-      className="inline-flex items-center gap-1 rounded-md bg-ink px-2 py-0.5 text-[11px] font-medium text-canvas disabled:opacity-40">
-      <Download className="size-3" /> {t("settings.installInApp")}
-    </button>
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      {errorThis && (
+        <span className="max-w-56 truncate text-[10.5px] text-[#b04141]" title={state.error || ""}>
+          {t("settings.installFailed")}{state.error ? ` — ${state.error}` : ""}
+        </span>
+      )}
+      <button onClick={() => onInstall(target)} disabled={anyInstalling}
+        className="inline-flex shrink-0 items-center gap-1 rounded-md bg-ink px-2 py-0.5 text-[11px] font-medium text-canvas disabled:opacity-40">
+        <Download className="size-3" /> {errorThis ? t("settings.retry") : t("settings.installInApp")}
+      </button>
+    </span>
   );
 }
 

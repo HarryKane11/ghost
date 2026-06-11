@@ -92,7 +92,7 @@ INSTALL_PKGS = {
     "granite": ["transformers>=4.52", "torchaudio", "peft"],
     "tts": ["supertonic>=1.3.1"],
 }
-_INSTALL: dict = {"state": "idle", "target": None, "error": None}  # idle|installing|done|error
+_INSTALL: dict = {"state": "idle", "target": None, "error": None, "detail": None}  # idle|installing|done|error
 
 
 def install_target_for(model_id: str) -> str:
@@ -104,14 +104,47 @@ def engine_install_status() -> dict:
     return dict(_INSTALL)
 
 
-def install_engine(target: str) -> dict:
-    """옵셔널 엔진 패키지를 백엔드 venv에 설치(백그라운드). 진행 상태는 engine_install_status."""
+def _run_install_cmd(cmd: list) -> tuple:
+    """설치 명령 실행 — 출력을 줄 단위로 읽어 마지막 줄을 _INSTALL['detail']로 노출.
+
+    이전의 subprocess.run(capture_output)은 수 분짜리 다운로드 동안 아무 피드백이 없어
+    UI가 '설치 중…'만 보여줬다. 줄 스트리밍으로 진행을 가시화하고, 워치독 타이머로
+    완전 무응답(네트워크 행)도 40분 내 강제 종료해 error 상태로 빠지게 한다.
+
+    Returns:
+        (returncode, 출력 꼬리 문자열)
+    """
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    watchdog = threading.Timer(2400, proc.kill)
+    watchdog.start()
+    tail: list = []
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if line:
+                _INSTALL["detail"] = line[-200:]
+                tail.append(line)
+                del tail[:-8]
+        proc.wait(timeout=60)
+    finally:
+        watchdog.cancel()
+    return proc.returncode, "\n".join(tail)[-400:]
+
+
+def install_engine(target: str, on_done=None) -> dict:
+    """옵셔널 엔진 패키지를 백엔드 venv에 설치(백그라운드). 진행 상태는 engine_install_status.
+
+    Args:
+        target: INSTALL_PKGS 키 (local | faster-whisper | whisperx | granite | tts).
+        on_done: 설치 성공 시 호출되는 콜백(서버가 stt_ready 재평가에 사용).
+    """
     pkgs = INSTALL_PKGS.get(target)
     if not pkgs:
         return {"ok": False, "error": f"unknown target: {target}"}
     if _INSTALL["state"] == "installing":
         return dict(_INSTALL)
-    _INSTALL.update(state="installing", target=target, error=None)
+    _INSTALL.update(state="installing", target=target, error=None, detail=None)
 
     def _w():
         # 실행 중인 '바로 그 venv'(sys.executable)에 설치 — DMG에선 userData/backend/.venv(쓰기 가능).
@@ -124,17 +157,22 @@ def install_engine(target: str) -> dict:
         try:
             for cmd in attempts:
                 try:
-                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=2400)
+                    code, out = _run_install_cmd(cmd)
                 except FileNotFoundError:
                     continue   # uv 미존재 → 다음 폴백
-                if r.returncode == 0:
+                if code == 0:
                     importlib.invalidate_caches()   # 새 패키지를 find_spec/import가 인식
-                    _INSTALL.update(state="done", error=None)
+                    _INSTALL.update(state="done", error=None, detail=None)
+                    if on_done is not None:
+                        try:
+                            on_done()
+                        except Exception:  # noqa: BLE001 — 재평가 실패가 설치 성공을 가리지 않게
+                            pass
                     return
-                last_err = (r.stderr or last_err)[-400:]
-            _INSTALL.update(state="error", error=last_err)
+                last_err = out or last_err
+            _INSTALL.update(state="error", error=last_err, detail=None)
         except Exception as ex:  # noqa: BLE001
-            _INSTALL.update(state="error", error=str(ex))
+            _INSTALL.update(state="error", error=str(ex), detail=None)
 
     threading.Thread(target=_w, daemon=True).start()
     return dict(_INSTALL)
@@ -326,8 +364,13 @@ def download_status(model_path: Optional[str] = None) -> dict:
     }
 
 
-def start_download(model_path: Optional[str] = None) -> dict:
-    """현재(또는 지정) 모델을 백그라운드로 받기 시작한다(재개 가능). 이미 받는 중이면 무시."""
+def start_download(model_path: Optional[str] = None, on_done=None) -> dict:
+    """현재(또는 지정) 모델을 백그라운드로 받기 시작한다(재개 가능). 이미 받는 중이면 무시.
+
+    Args:
+        model_path: 받을 모델 id(기본: 활성 모델).
+        on_done: 다운로드 성공 시 호출되는 콜백(서버가 stt_ready 재평가·warmup에 사용).
+    """
     mp = model_path or active_model()
     repo = _repo(mp)
     if _DL["state"] == "downloading":
@@ -339,6 +382,11 @@ def start_download(model_path: Optional[str] = None) -> dict:
             from huggingface_hub import snapshot_download
             snapshot_download(repo)  # 재개 지원, HF 캐시에 저장
             _DL["state"] = "done"
+            if on_done is not None:
+                try:
+                    on_done()
+                except Exception:  # noqa: BLE001 — 재평가 실패가 다운로드 성공을 가리지 않게
+                    pass
         except Exception as ex:  # noqa: BLE001
             _DL.update(state="error", error=str(ex))
 

@@ -383,7 +383,7 @@ export async function getSttModels(): Promise<SttModels | null> {
   } catch { return null; }
 }
 // 인앱 엔진 설치 (터미널 불필요)
-export type EngineInstall = { state: "idle" | "installing" | "done" | "error"; target?: string | null; error?: string | null };
+export type EngineInstall = { state: "idle" | "installing" | "done" | "error"; target?: string | null; error?: string | null; detail?: string | null };
 export async function installEngine(target: string): Promise<EngineInstall> {
   try { return await (await ghostFetch(`${BASE}/api/stt/engine/install`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ target }) })).json(); } catch (e) { return { state: "error", error: String(e) }; }
 }
