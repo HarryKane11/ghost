@@ -254,7 +254,7 @@ async function createWindow() {
       nodeIntegration: false,
       // 오브 모드에서 창을 숨겨도 렌더러의 오디오 캡처·전사 루프가 멈추지 않게.
       backgroundThrottling: false,
-      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`],
+      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`, `--ghost-version=${expectedBuild()}`],
     },
   });
   win.once("ready-to-show", () => win.show());
@@ -307,7 +307,7 @@ async function createOrbWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
-      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`],
+      additionalArguments: [`--ghost-token=${GHOST_TOKEN}`, `--ghost-version=${expectedBuild()}`],
     },
   });
   orb.setAlwaysOnTop(true, "floating");
