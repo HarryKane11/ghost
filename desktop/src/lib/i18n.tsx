@@ -20,6 +20,8 @@ const DICT: Record<string, Record<Lang, string>> = {
   "trans.cloud": { ko: "클라우드", en: "Cloud", zh: "云端" },
   "trans.local": { ko: "로컬", en: "Local", zh: "本地" },
   "trans.needInstall": { ko: "설치필요", en: "install", zh: "需安装" },
+  "trans.needDownload": { ko: "다운로드 필요", en: "download", zh: "需下载" },
+  "hist.rename": { ko: "이름 변경", en: "Rename", zh: "重命名" },
   "admin.title": { ko: "관리자", en: "Admin", zh: "管理" },
   "admin.back": { ko: "뒤로", en: "Back", zh: "返回" },
   "admin.searchMeetings": { ko: "회의 검색…", en: "Search meetings…", zh: "搜索会议…" },

@@ -109,6 +109,17 @@ export async function deleteMeeting(meetingId: string): Promise<boolean> {
 export async function getDigests(meetingId: string): Promise<{ t?: string; spec: Spec }[]> {
   try { return (await (await ghostFetch(`${BASE}/api/meetings/${meetingId}/digests`)).json()).digests || []; } catch { return []; }
 }
+/** 회의별 질의응답 카드(채팅 세션) — 회의 클릭 시 그 회의의 대화 기록을 복원한다. */
+export type SavedCard = { t?: string; query: string; ack?: string; spec: Spec; backend?: string };
+export async function getMeetingCards(meetingId: string): Promise<SavedCard[]> {
+  try { return (await (await ghostFetch(`${BASE}/api/meetings/${meetingId}/cards`)).json()).cards || []; } catch { return []; }
+}
+export async function saveMeetingCard(meetingId: string, card: { query: string; ack?: string; spec: Spec; backend?: string }): Promise<boolean> {
+  try {
+    const r = await ghostFetch(`${BASE}/api/meetings/${meetingId}/cards`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(card) });
+    return (await r.json()).ok === true;
+  } catch { return false; }
+}
 export type ScriptParagraph = { t?: string; cleaned: string; bullets: string[] };
 export async function getScript(meetingId: string, flush = false): Promise<ScriptParagraph[]> {
   try { return (await (await ghostFetch(`${BASE}/api/meetings/${meetingId}/script${flush ? "?flush=true" : ""}`)).json()).script || []; } catch { return []; }
@@ -360,7 +371,7 @@ export async function setGlossary(items: GlossaryItem[]): Promise<GlossaryItem[]
   try { return (await (await ghostFetch(`${BASE}/api/glossary`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ glossary: items }) })).json()).glossary || []; } catch { return items; }
 }
 
-export type SttModelOption = { id: string; label: string; lang?: string; approx_gb?: number; engine?: string; streaming?: boolean; diarization?: boolean; engine_ready?: boolean; install?: string };
+export type SttModelOption = { id: string; label: string; lang?: string; approx_gb?: number; engine?: string; streaming?: boolean; diarization?: boolean; engine_ready?: boolean; install?: string; present?: boolean; size_bytes?: number };
 export type SttModels = { local: SttModelOption[]; local_active: string; cloud: SttModelOption[]; cloud_active: string };
 export type StreamKind = "elevenlabs" | "parakeet" | null;
 export function sttWsUrl(meetingId = "", source = "mic"): string {

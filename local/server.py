@@ -640,6 +640,25 @@ def delete_meeting_ep(meeting_id: str) -> dict:
     return {"ok": store.delete_meeting(meeting_id)}
 
 
+class CardReq(BaseModel):
+    query: str = ""
+    ack: str = ""
+    spec: dict
+    backend: str = ""
+
+
+@app.get("/api/meetings/{meeting_id}/cards")
+def get_cards_ep(meeting_id: str) -> dict:
+    """회의별 질의응답 카드(채팅 세션) 기록 — 회의 클릭 시 복원용."""
+    return {"cards": store.read_cards(meeting_id)}
+
+
+@app.post("/api/meetings/{meeting_id}/cards")
+def add_card_ep(meeting_id: str, req: CardReq) -> dict:
+    """완료된 질의응답 카드를 회의에 저장(회의별 채팅 세션)."""
+    return {"ok": store.append_card(meeting_id, {"query": req.query, "ack": req.ack, "spec": req.spec, "backend": req.backend})}
+
+
 @app.get("/api/meetings/{meeting_id}/digests")
 def get_digests_ep(meeting_id: str) -> dict:
     """저장된 5분 다이제스트 기록 — 재시작 후 UI 복원용."""

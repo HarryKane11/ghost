@@ -47,7 +47,12 @@ export function ModelPicker({
             {models?.local.map((m) => (
               <button key={m.id} onClick={() => { onPick("local", m.id); setOpen(false); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-steel hover:bg-surface-soft">
                 <span className="truncate">{m.label.split(" · ")[0]}</span>
-                {m.engine_ready === false && <span className="ml-auto shrink-0 text-[9.5px] text-[#b06a00]">{t("trans.needInstall")}</span>}
+                {/* 엔진 미설치 > 모델 미다운로드 순으로 안내 — 받지 않은 모델이 라벨 없이 선택되던 문제(#11) */}
+                {m.engine_ready === false ? (
+                  <span className="ml-auto shrink-0 text-[9.5px] text-[#b06a00]">{t("trans.needInstall")}</span>
+                ) : m.present === false ? (
+                  <span className="ml-auto shrink-0 text-[9.5px] text-[#b06a00]">{t("trans.needDownload")}</span>
+                ) : null}
                 {!isCloud && models?.local_active === m.id && <Check className="ml-auto size-3.5 shrink-0 text-spark-deep" />}
               </button>
             ))}
