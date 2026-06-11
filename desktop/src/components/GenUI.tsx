@@ -63,7 +63,7 @@ export type Spec = {
   blocks: Block[];
 };
 
-const PALETTE = ["#00b48a", "#0a0a0a", "#5a5a5c", "#e9a23b", "#6b8af0", "#7cebcb", "#d05757"];
+const PALETTE = ["#7c3aed", "#0a0a0a", "#5a5a5c", "#e9a23b", "#6b8af0", "#c4b5fd", "#d05757"];
 
 function hostname(u: string) {
   try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; }

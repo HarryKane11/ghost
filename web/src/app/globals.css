@@ -23,9 +23,9 @@
   --hairline-soft: #ededed;
 
   /* accent (sparingly — the logo's "spark") */
-  --spark: #00d4a4;
-  --spark-deep: #00b48a;
-  --spark-soft: #7cebcb;
+  --spark: #8b5cf6;
+  --spark-deep: #7c3aed;
+  --spark-soft: #c4b5fd;
 
   /* semantic (shadcn-compatible names) */
   --background: var(--canvas);

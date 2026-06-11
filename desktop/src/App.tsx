@@ -146,8 +146,10 @@ function UnclearChip({ heard, guess, onConfirm, onSkip, t }: {
 
 const GHOST_KEYS = ["ghost.l0", "ghost.l1", "ghost.l2", "ghost.l3", "ghost.l4", "ghost.l5", "ghost.l6"];
 
-/** 스트리밍 로더 — 유령이 카드 위를 가로질러 날아다니며 일하는 중임을 보여준다.
- * 메시지 롤링만 있던 이전 버전보다 '살아 있는' 느낌. 트랙 위 트레일이 유령을 따라간다. */
+/** 스트리밍 로더 — 유령작가. 트랙 위를 직선으로 지나가는 대신, 유령이 답이 될
+ * 안개 줄을 직접 '쓴다'. 줄 끝에서 둥실거리며 줄이 자라나고, 다 쓰면 스르륵
+ * 사라져 다음 줄 시작점에서 다시 맺힌다. 스트리밍이 끝나면 이 자리에 실제 답이
+ * materialize되므로, 로더가 사라지는 게 아니라 콘텐츠가 된다. */
 function GhostStreamLoader() {
   const { t } = useT();
   const [i, setI] = useState(0);
@@ -156,11 +158,15 @@ function GhostStreamLoader() {
     return () => clearInterval(id);
   }, []);
   return (
-    <div className="space-y-1.5">
-      <div className="relative h-9 overflow-hidden rounded-xl border border-hairline/50 bg-surface-soft/40">
-        <div className="ghost-stream-trail absolute inset-y-0 w-28" />
-        <span className="phantom-fly text-spark-deep" style={{ ["--fly-dur" as any]: "2.8s" }}>
-          <GhostLogo variant="mark" size={18} />
+    <div className="space-y-2.5">
+      <div className="relative h-[58px]">
+        <div className="scribe-line scribe-line-1 absolute left-0 top-0 h-2.5 rounded-full" />
+        <div className="scribe-line scribe-line-2 absolute left-0 top-6 h-2.5 rounded-full" />
+        <div className="scribe-line scribe-line-3 absolute left-0 top-12 h-2.5 rounded-full" />
+        <span className="scribe-ghost text-spark-deep">
+          <span className="scribe-bob">
+            <GhostLogo variant="mark" size={18} />
+          </span>
         </span>
       </div>
       <div className="flex items-center gap-2 px-0.5 text-[12px] italic text-steel">
@@ -1309,7 +1315,8 @@ export default function App() {
                 </div>
               ) : (
                 <article key={it.id} className={cn("materialize rounded-2xl border bg-canvas/90 p-4 backdrop-blur-sm",
-                  it.pinned ? "border-spark-soft shadow-[0_6px_30px_-6px_color-mix(in_srgb,var(--spark)_32%,transparent)]" : "border-hairline shadow-[0_4px_24px_-8px_rgba(10,10,10,0.12)]")}>
+                  it.pinned ? "border-spark-soft shadow-[0_6px_30px_-6px_color-mix(in_srgb,var(--spark)_32%,transparent)]" : "border-hairline shadow-[0_4px_24px_-8px_rgba(10,10,10,0.12)]",
+                  it.status === "working" && "possessed")}>
                   <div className="mb-2.5 flex items-start gap-2">
                     <GhostLogo variant="icon" size={18} className="mt-0.5 shrink-0 rounded-[5px]" />
                     <div className="min-w-0 flex-1">
@@ -1337,7 +1344,6 @@ export default function App() {
                           return <div key={i} style={{ opacity: op }} className={cn("wisp flex items-center gap-2 text-[12px]", last ? "haze text-foreground" : "text-stone")}><ProgressLine text={p.text} kind={p.kind} active={last} /></div>;
                         })}
                       </div>
-                      <div className="space-y-2 pt-0.5"><div className="mist h-2.5 w-3/4 rounded-full" /><div className="mist h-2.5 w-1/2 rounded-full" /></div>
                     </div>
                   ) : it.spec ? (
                     <>
