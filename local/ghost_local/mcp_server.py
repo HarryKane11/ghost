@@ -13,6 +13,7 @@ Ghost가 저장한 회의록 전체(~/Ghost/meetings/)에 접근한다. 현재 �
   get_transcript(id)          전사 평문
   get_summary(id)             롤링 요약(요약·결정·액션·미해결·용어·수치)
   open_action_items()         최근 회의들의 액션 아이템·미해결 질문 횡단 수집
+  export_minutes(id)          회의록(+요약·결정·액션)을 마크다운 문서로 export
   current_meeting()           가장 최근(진행 중일 가능성) 회의
   append_note(id, text)       회의에 메모 남기기 (notes.jsonl append — 전사·회의록은 불변)
 
@@ -93,6 +94,16 @@ def open_action_items(limit_meetings: int = 20) -> List[dict]:
                     "started_at": meta.get("started_at"),
                     "action_items": actions, "open_questions": questions})
     return out
+
+
+@mcp.tool()
+def export_minutes(meeting_id: str) -> str:
+    """회의 1건을 마크다운 문서로 export — 회의록 + 요약·결정·액션·미해결 질문.
+
+    에이전트가 회의 결과를 메일·문서·티켓 등으로 가공할 때 바로 쓸 수 있는 형태.
+    회의록이 아직 없으면 롤링 요약 기반의 최소 문서를 만든다. 회의가 없으면 빈 문자열.
+    """
+    return store.minutes_markdown(meeting_id)
 
 
 @mcp.tool()

@@ -136,7 +136,8 @@ def _local_native_segments(path: str, model_id: str, engine: str) -> List[Segmen
 
 
 # ── 청크 폴백: 어떤 ASR이든 동작(N초 분할 후 각 청크 전사) ────────────────────
-def _chunk_segments(path: str, transcribe_fn: Callable[[str], str], window: float = CHUNK_SEC) -> List[Segment]:
+def _chunk_segments(path: str, transcribe_fn: Callable[[str], str], window: float = CHUNK_SEC,
+                    on_progress: Optional[Callable[[dict], None]] = None) -> List[Segment]:
     wav = _to_wav16k(path)
     out_dir = tempfile.mkdtemp(prefix="ghost_chunks_")
     pattern = os.path.join(out_dir, "chunk_%04d.wav")
@@ -147,6 +148,8 @@ def _chunk_segments(path: str, transcribe_fn: Callable[[str], str], window: floa
             capture_output=True, check=False,
         )
         files = sorted(f for f in os.listdir(out_dir) if f.startswith("chunk_"))
+        if on_progress:
+            on_progress({"stage": "chunks", "done": 0, "total": len(files)})
         segs: List[Segment] = []
         for i, fn in enumerate(files):
             fp = os.path.join(out_dir, fn)
@@ -156,6 +159,8 @@ def _chunk_segments(path: str, transcribe_fn: Callable[[str], str], window: floa
                 text = ""
             if text:
                 segs.append({"start": round(i * window, 2), "end": round((i + 1) * window, 2), "text": text})
+            if on_progress:
+                on_progress({"stage": "chunks", "done": i + 1, "total": len(files)})
         return segs
     finally:
         for fn in os.listdir(out_dir):
@@ -173,13 +178,27 @@ def _chunk_segments(path: str, transcribe_fn: Callable[[str], str], window: floa
             pass
 
 
-def transcribe_segments(path: str, provider: str, lang: Optional[str], eleven_key: str = "") -> List[Segment]:
-    """업로드 음성 → 타임스탬프 세그먼트. 네이티브 우선, 안 되면 청크 폴백."""
+def transcribe_segments(path: str, provider: str, lang: Optional[str], eleven_key: str = "",
+                        on_progress: Optional[Callable[[dict], None]] = None) -> List[Segment]:
+    """업로드 음성 → 타임스탬프 세그먼트. 네이티브 우선, 안 되면 청크 폴백.
+
+    Args:
+        on_progress: 진행 콜백 — {"stage": "cloud"|"native"|"chunks", "done"?, "total"?}.
+            청크 폴백만 done/total이 있고, 클라우드/네이티브는 단일 호출이라 stage만 온다.
+    """
     from ghost_local import stt
+
+    def _emit(p: dict) -> None:
+        if on_progress:
+            try:
+                on_progress(p)
+            except Exception:  # noqa: BLE001 — 진행 보고 실패가 전사를 막지 않게
+                pass
 
     # 1) 클라우드(ElevenLabs) — 단어 타임스탬프
     if provider == "elevenlabs" and eleven_key:
         try:
+            _emit({"stage": "cloud"})
             segs = _eleven_segments(path, lang, eleven_key)
             if segs:
                 return segs
@@ -191,6 +210,7 @@ def transcribe_segments(path: str, provider: str, lang: Optional[str], eleven_ke
     eng = stt._engine(mid)
     if eng in ("faster-whisper", "whisperx") and stt.engine_available(eng):
         try:
+            _emit({"stage": "native"})
             segs = _local_native_segments(path, mid, eng)
             if segs:
                 return segs
@@ -198,4 +218,4 @@ def transcribe_segments(path: str, provider: str, lang: Optional[str], eleven_ke
             pass
 
     # 3) 청크 폴백(mlx Qwen3/Whisper · granite 등 — 어떤 모델이든)
-    return _chunk_segments(path, lambda p: stt.transcribe(p))
+    return _chunk_segments(path, lambda p: stt.transcribe(p), on_progress=_emit)

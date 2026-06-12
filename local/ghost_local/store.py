@@ -552,6 +552,84 @@ def list_meetings(limit: int = 50) -> List[dict]:
     return out
 
 
+def _block_md(b: dict) -> List[str]:
+    """GenUI 블럭 1개 → 마크다운 줄들. 모르는 타입은 text/items 기반으로 안전 폴백."""
+    t = b.get("type", "")
+    text = str(b.get("text") or "").strip()
+    label = str(b.get("label") or "").strip()
+    value = str(b.get("value") or "").strip()
+    items = [str(i) for i in (b.get("items") or [])]
+    url = str(b.get("url") or "").strip()
+    if t == "heading":
+        return [f"## {text or label}", ""]
+    if t == "divider":
+        return ["---", ""]
+    if t in ("quote", "handwritten"):
+        return [f"> {text}", ""] if text else []
+    if t == "callout":
+        return [f"> **{value or 'note'}**: {text}", ""] if text else []
+    if t in ("stat", "progress"):
+        return [f"- **{label}**: {value}{(' — ' + text) if text else ''}", ""] if (label or value) else []
+    if t == "keyvalue":
+        rows = [f"- **{p[0].strip()}**: {p[1].strip()}" if len(p) == 2 else f"- {r}"
+                for r in items for p in [r.split("|", 1)]]
+        return rows + [""] if rows else []
+    if t == "table" and items:
+        rows = [r.split("|") for r in items]
+        md = ["| " + " | ".join(c.strip() for c in rows[0]) + " |",
+              "|" + "---|" * len(rows[0])]
+        md += ["| " + " | ".join(c.strip() for c in r) + " |" for r in rows[1:]]
+        return md + [""]
+    if t == "steps":
+        return [f"{i + 1}. {s}" for i, s in enumerate(items)] + [""] if items else []
+    if t == "checklist":
+        return [f"- [ ] {s}" for s in items] + [""] if items else []
+    if t == "link" and url:
+        return [f"- [{label or text or url}]({url})", ""]
+    if t == "image":
+        return [f"![{label or 'image'}]({url})", ""] if url else []
+    if t in ("code", "mermaid"):
+        lang = "mermaid" if t == "mermaid" else (label or "")
+        return [f"```{lang}", text, "```", ""] if text else []
+    if items:   # list · badges · timeline · accordion · tabs · actions · 기타
+        head = [f"**{label or text}**"] if (label or text) else []
+        return head + [f"- {s}" for s in items] + [""]
+    if text:
+        return [text, ""]
+    return []
+
+
+def minutes_markdown(meeting_id: str) -> str:
+    """회의 1건을 마크다운 문서로 직렬화 — 회의록(blocks) + 요약·결정·액션·미해결.
+
+    MCP export_minutes 및 내보내기용. 회의록(spec)이 없으면 롤링 요약 기반 최소 문서.
+    """
+    meta = get_meta(meeting_id)
+    if meta is None:
+        return ""
+    lines: List[str] = [f"# {meta.get('title', meeting_id)}", ""]
+    info = []
+    if meta.get("started_at"):
+        info.append(f"일시: {meta['started_at']}")
+    dur = _duration_sec(meta)
+    if dur:
+        info.append(f"길이: {max(1, dur // 60)}분")
+    if info:
+        lines += ["- " + "\n- ".join(info), ""]
+    minutes = get_minutes(meeting_id)
+    if minutes:
+        for b in minutes.get("blocks", []):
+            if isinstance(b, dict):
+                lines += _block_md(b)
+    elif meta.get("summary"):
+        lines += ["## 요약", str(meta["summary"]), ""]
+    for key, head in (("decisions", "결정"), ("action_items", "액션 아이템"), ("open_questions", "미해결 질문")):
+        vals = meta.get(key) or []
+        if vals:
+            lines += [f"## {head}"] + [f"- {v}" for v in vals] + [""]
+    return "\n".join(lines).strip() + "\n"
+
+
 def _card_brief(card: dict) -> dict:
     """질의응답 카드를 MCP 소비용 요약으로 — GenUI spec 전체 대신 질문·답 텍스트만."""
     spec = card.get("spec") or {}

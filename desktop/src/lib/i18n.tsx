@@ -139,6 +139,7 @@ const DICT: Record<string, Record<Lang, string>> = {
   "orb.collapse": { ko: "플로팅 아이콘으로 (백그라운드 청취)", en: "Collapse to floating orb (keeps listening)", zh: "收起为悬浮图标（继续聆听）" },
   "ob.openSettings": { ko: "시스템 설정 열기", en: "Open System Settings", zh: "打开系统设置" },
   "audio.cancel": { ko: "업로드 취소", en: "Cancel upload", zh: "取消上传" },
+  "audio.transcribeProg": { ko: "전사 중 — {done}/{total} 구간", en: "Transcribing — {done}/{total} chunks", zh: "转写中 — {done}/{total} 段" },
   "audio.save": { ko: "회의로 저장", en: "Save as meeting", zh: "保存为会议" },
   "audio.saved": { ko: "저장됨", en: "Saved", zh: "已保存" },
   "audio.saveHint": { ko: "전사와 회의록을 회의 내역에 저장해요 — 검색·MCP에서도 접근할 수 있어요.", en: "Saves the transcript and minutes to your meetings — searchable and accessible via MCP.", zh: "将转写与纪要保存到会议记录——可搜索，也可通过 MCP 访问。" },

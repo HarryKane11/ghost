@@ -453,12 +453,20 @@ export async function transcribe(blob: Blob, meetingId = "", source = "mic"): Pr
 
 // ── 음성 파일 업로드 모드 ────────────────────────────────────────────────────
 export type AudioSegment = { start: number; end: number; text: string; speaker?: number };
-export type AudioTranscript = { ok: boolean; segments: AudioSegment[]; provider?: string; model?: string; duration?: number; error?: string };
+export type AudioJob = {
+  ok?: boolean;
+  state: "running" | "done" | "error" | "missing";
+  stage?: "preparing" | "cloud" | "native" | "chunks";
+  done?: number; total?: number;
+  segments?: AudioSegment[]; provider?: string; model?: string; duration?: number; error?: string;
+};
+/** 업로드는 즉시 잡 id를 돌려주고(긴 파일 대비), 전사 진행/결과는 getAudioJob으로 폴링한다. */
+export type AudioUploadAck = { ok: boolean; job?: string; error?: string };
 export async function uploadAudio(
   file: File,
   onProgress?: (pct: number) => void,
   registerAbort?: (abort: () => void) => void,   // 호출부가 취소 핸들을 받아간다(긴 업로드 탈출구)
-): Promise<AudioTranscript> {
+): Promise<AudioUploadAck> {
   const fd = new FormData();
   fd.append("audio_file", file, file.name);
   // XHR로 업로드 진행률 제공(큰 파일 대비).
@@ -476,6 +484,10 @@ export async function uploadAudio(
     xhr.onerror = () => reject(new Error("audio transcribe failed"));
     xhr.send(fd);
   });
+}
+export async function getAudioJob(jobId: string): Promise<AudioJob> {
+  try { return await (await ghostFetch(`${BASE}/api/audio/transcribe/${jobId}`)).json(); }
+  catch { return { state: "running" }; }   // 일시 네트워크 오류 — 다음 폴링에서 재시도
 }
 export function streamAudioMinutes(segments: AudioSegment[], context: string, h: StreamHandlers, lang = "") {
   return streamSSE("/api/audio/minutes/stream", { segments, context, lang }, h);
