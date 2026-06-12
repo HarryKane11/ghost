@@ -28,7 +28,7 @@ export function AudioView({
   open: boolean;
   onClose: () => void;
   isMac?: boolean;
-  t: (k: string) => string;
+  t: (k: string, vars?: Record<string, string | number>) => string;
   provider?: string;
   models: api.SttModels | null;
   onPickModel: (kind: "local" | "cloud", id: string) => void;
@@ -49,6 +49,8 @@ export function AudioView({
   const [audioUrl, setAudioUrl] = useState<string>("");
   const [segments, setSegments] = useState<api.AudioSegment[]>([]);
   const [upPct, setUpPct] = useState(0);
+  // 전사 잡 진행(긴 파일 대비) — 청크 폴백일 때 done/total이 채워진다.
+  const [transProg, setTransProg] = useState<{ stage: string; done: number; total: number }>({ stage: "", done: 0, total: 0 });
   const [minutes, setMinutes] = useState<Spec | null>(null);
   const [minBusy, setMinBusy] = useState(false);
   const [minProgress, setMinProgress] = useState<string>("");
@@ -60,6 +62,7 @@ export function AudioView({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<(() => void) | null>(null);   // 진행 중 업로드 취소 핸들
   const savedIdRef = useRef<string>("");                 // 저장된 회의 id — 이후 회의록 생성 시 거기에 붙인다
+  const pickGenRef = useRef(0);                          // 새 파일 선택 시 이전 잡 폴링 무효화
 
   const DRAG = { WebkitAppRegion: "drag" } as any;
   const NODRAG = { WebkitAppRegion: "no-drag" } as any;
@@ -77,12 +80,24 @@ export function AudioView({
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudioUrl(URL.createObjectURL(file));
     setSegments([]); setMinutes(null); setErr(""); setUpPct(0); setSaveState("idle"); savedIdRef.current = "";
+    setTransProg({ stage: "", done: 0, total: 0 });
     setPhase("transcribing");
+    const gen = ++pickGenRef.current;
     try {
-      const r = await api.uploadAudio(file, setUpPct, (abort) => { abortRef.current = abort; });
+      const up = await api.uploadAudio(file, setUpPct, (abort) => { abortRef.current = abort; });
       // 백엔드가 원인을 주면 그대로 보여준다(예: 로컬 STT 미설치 안내) — 이전엔 전부 "텍스트 없음"이었다.
-      if (!r.ok || !r.segments?.length) { setPhase("error"); setErr(r.error || t("audio.noText")); return; }
-      setSegments(r.segments);
+      if (!up.ok || !up.job) { setPhase("error"); setErr(up.error || t("audio.noText")); return; }
+      setUpPct(100);
+      // 업로드 완료 → 전사 잡 폴링(긴 파일도 진행이 보인다).
+      let job: api.AudioJob = { state: "running" };
+      while (job.state === "running") {
+        await new Promise((d) => setTimeout(d, 1000));
+        if (pickGenRef.current !== gen) return;   // 다른 파일을 새로 골랐으면 이 폴링은 종료
+        job = await api.getAudioJob(up.job);
+        if (job.state === "running") setTransProg({ stage: job.stage || "", done: job.done || 0, total: job.total || 0 });
+      }
+      if (job.state !== "done" || !job.segments?.length) { setPhase("error"); setErr(job.error || t("audio.noText")); return; }
+      setSegments(job.segments);
       setPhase("ready");
     } catch (e) {
       // 사용자가 직접 취소했으면 에러가 아니라 빈 상태로 복귀.
@@ -181,7 +196,19 @@ export function AudioView({
       ) : phase === "transcribing" ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-stone">
           <Loader2 className="size-7 animate-spin text-spark-deep" />
-          <p className="text-[13px]">{upPct < 100 ? `${t("audio.uploading")} ${upPct}%` : t("audio.transcribing")}</p>
+          {upPct < 100 ? (
+            <p className="text-[13px]">{t("audio.uploading")} {upPct}%</p>
+          ) : transProg.stage === "chunks" && transProg.total > 0 ? (
+            <div className="w-64">
+              {/* 청크 전사 진행률 — 긴 파일도 어디까지 왔는지 보인다 */}
+              <div className="h-2 overflow-hidden rounded-full bg-surface">
+                <div className="h-full rounded-full bg-spark transition-all" style={{ width: `${Math.round((transProg.done / transProg.total) * 100)}%` }} />
+              </div>
+              <p className="mt-1.5 text-center text-[12.5px]">{t("audio.transcribeProg", { done: transProg.done, total: transProg.total })}</p>
+            </div>
+          ) : (
+            <p className="text-[13px]">{t("audio.transcribing")}</p>
+          )}
           {upPct < 100 && (
             <button onClick={cancelUpload} className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-steel hover:text-foreground">
               {t("audio.cancel")}

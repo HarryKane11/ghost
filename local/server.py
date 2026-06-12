@@ -659,6 +659,15 @@ def add_card_ep(meeting_id: str, req: CardReq) -> dict:
     return {"ok": store.append_card(meeting_id, {"query": req.query, "ack": req.ack, "spec": req.spec, "backend": req.backend})}
 
 
+@app.get("/api/meetings/{meeting_id}/export")
+def export_meeting_md(meeting_id: str) -> dict:
+    """회의록(+요약·결정·액션)을 마크다운으로 export. MCP export_minutes와 동일 직렬화."""
+    md = store.minutes_markdown(meeting_id)
+    if not md:
+        return {"ok": False, "error": "회의를 찾지 못했어요."}
+    return {"ok": True, "markdown": md}
+
+
 @app.get("/api/meetings/{meeting_id}/digests")
 def get_digests_ep(meeting_id: str) -> dict:
     """저장된 5분 다이제스트 기록 — 재시작 후 UI 복원용."""
@@ -1103,9 +1112,15 @@ def _fmt_ts(sec: float) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+# 업로드 전사 잡 — 긴 파일도 업로드 직후 응답하고, UI가 진행률을 폴링한다.
+# (이전: 단일 동기 응답이라 수십 분짜리 파일은 스피너만 돌았다)
+_AUDIO_JOBS: dict = {}
+_AUDIO_JOBS_MAX = 8
+
+
 @app.post("/api/audio/transcribe")
 async def audio_transcribe(audio_file: UploadFile = File(...)) -> dict:
-    """업로드 음성(mp3/mp4/m4a/wav…) → 설정된 ASR로 타임스탬프 세그먼트 전사."""
+    """업로드 음성(mp3/mp4/m4a/wav…) → 백그라운드 전사 잡 시작. 진행/결과는 GET으로 폴링."""
     # 로컬 경로(클라우드 키 없음 포함)로 갈 거면 엔진·모델 준비를 먼저 확인한다 —
     # 이전엔 미설치 상태에서 청크 전사가 조용히 전부 실패해 "전사된 텍스트가 없어요"로 보였다.
     provider = STATE.get("stt_provider", "elevenlabs")
@@ -1117,22 +1132,44 @@ async def audio_transcribe(audio_file: UploadFile = File(...)) -> dict:
     raw = _secure_tmp("ghost_audio_")
     with open(raw, "wb") as f:
         shutil.copyfileobj(audio_file.file, f)
-    try:
-        segs = audio.transcribe_segments(raw, provider, STATE.get("lang"), stt_cloud.elevenlabs_key())
-        # ElevenLabs로 전사했으면 사용량 누적(전체 길이).
+    job_id = uuid.uuid4().hex
+    job: dict = {"state": "running", "stage": "preparing", "done": 0, "total": 0}
+    while len(_AUDIO_JOBS) >= _AUDIO_JOBS_MAX:   # 오래된 잡부터 정리(메모리 캡)
+        _AUDIO_JOBS.pop(next(iter(_AUDIO_JOBS)), None)
+    _AUDIO_JOBS[job_id] = job
+
+    def _w() -> None:
         try:
-            if provider == "elevenlabs" and stt_cloud.elevenlabs_key() and segs:
-                from ghost_local import usage
-                usage.record_eleven_stt(audio._duration(raw))
-        except Exception:  # noqa: BLE001
-            pass
-        model = stt_cloud.active_model() if provider == "elevenlabs" and stt_cloud.elevenlabs_key() else stt.active_model()
-        return {"ok": True, "segments": segs, "provider": provider, "model": model, "duration": audio._duration(raw)}
-    finally:
-        try:
-            os.unlink(raw)
-        except OSError:
-            pass
+            segs = audio.transcribe_segments(raw, provider, STATE.get("lang"), stt_cloud.elevenlabs_key(),
+                                             on_progress=job.update)
+            # ElevenLabs로 전사했으면 사용량 누적(전체 길이).
+            try:
+                if provider == "elevenlabs" and stt_cloud.elevenlabs_key() and segs:
+                    from ghost_local import usage
+                    usage.record_eleven_stt(audio._duration(raw))
+            except Exception:  # noqa: BLE001
+                pass
+            model = stt_cloud.active_model() if provider == "elevenlabs" and stt_cloud.elevenlabs_key() else stt.active_model()
+            job.update(state="done", segments=segs, provider=provider, model=model, duration=audio._duration(raw))
+        except Exception as ex:  # noqa: BLE001
+            job.update(state="error", error=str(ex))
+        finally:
+            try:
+                os.unlink(raw)
+            except OSError:
+                pass
+
+    threading.Thread(target=_w, daemon=True).start()
+    return {"ok": True, "job": job_id}
+
+
+@app.get("/api/audio/transcribe/{job_id}")
+def audio_transcribe_status(job_id: str) -> dict:
+    """전사 잡 진행/결과 폴링. state: running(stage·done·total) | done(segments) | error."""
+    job = _AUDIO_JOBS.get(job_id)
+    if job is None:
+        return {"ok": False, "state": "missing"}
+    return {"ok": True, **job}
 
 
 class AudioSaveReq(BaseModel):
