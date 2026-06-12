@@ -292,6 +292,12 @@ export async function getSttModel(): Promise<SttModel | null> {
 export async function downloadSttModel(): Promise<SttModel | null> {
   try { return await (await ghostFetch(`${BASE}/api/stt/model/download`, { method: "POST" })).json(); } catch { return null; }
 }
+export async function deleteSttModel(modelId: string): Promise<{ ok: boolean; deleted?: boolean; freed_bytes?: number; error?: string; message?: string }> {
+  try {
+    const r = await ghostFetch(`${BASE}/api/stt/model/delete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model_id: modelId }) });
+    return await r.json();
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
 
 // 인터뷰 모드 번역
 export type TransLang = { code: string; name: string; label: string };

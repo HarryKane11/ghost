@@ -246,7 +246,15 @@ export function SettingsMenu({
     else alert(r.message || r.error || t("settings.storageFailMsg"));
   };
   const downloadModel = async () => { setSttModel(await api.downloadSttModel()); };
+  // 다운로드된 모델 캐시 삭제 — 앱 밖에서 경로 찾아 지우던 불편 해소 (이슈 #20).
+  const deleteModel = async (id: string) => {
+    if (!confirm(t("model.deleteConfirm"))) return;
+    const r = await api.deleteSttModel(id);
+    if (!r.ok) alert(`${t("model.deleteFailed")} — ${r.message || r.error || ""}`);
+    refreshSttState();
+  };
   const gb = (n: number) => `${(n / 1e9).toFixed(1)}GB`;
+  const diskSize = (n: number) => (n >= 1e9 ? gb(n) : `${Math.max(1, Math.round(n / 1e6))}MB`);
 
   const connect = async (name: string, url = "") => {
     setBusy(name);
@@ -530,6 +538,16 @@ export function SettingsMenu({
                   </div>
                 );
               })()}
+              {/* 다운로드된 모델 → 디스크 점유 + 삭제 버튼 (이슈 #20: 앱에서 모델 삭제) */}
+              {sttModel && sttModel.present && sttModel.state !== "downloading" && (
+                <div className="mt-2 flex items-center gap-2 text-[11.5px] text-stone">
+                  <span className="tabular-nums">{t("settings.modelOnDisk")} {diskSize(sttModel.downloaded)}</span>
+                  <button onClick={() => deleteModel(sttModels.local_active)}
+                    className="inline-flex h-7 items-center gap-1 rounded-lg border border-hairline px-2 text-[11.5px] text-steel hover:border-[#d9a0a0] hover:text-[#b04141]">
+                    <Trash2 className="size-3" /> {t("model.delete")}
+                  </button>
+                </div>
+              )}
               {/* 선택한 모델 미다운로드 또는 다운로드 중 → 다운로드 UI (진행률은 state 기준으로 표시) */}
               {sttModel && (sttModels?.local.find((x) => x.id === sttModels.local_active)?.engine_ready !== false)
                 && (sttModel.state === "downloading" || !sttModel.present) && (

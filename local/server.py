@@ -748,6 +748,19 @@ def stt_model_download() -> dict:
     return stt.start_download(on_done=_recheck_stt)
 
 
+class SttModelDeleteReq(BaseModel):
+    model_id: str
+
+
+@app.post("/api/stt/model/delete")
+def stt_model_delete(req: SttModelDeleteReq) -> dict:
+    """다운로드된 로컬 ASR 모델 캐시 삭제(디스크 회수). 활성 모델이면 stt_ready 재평가."""
+    out = stt.delete_model(req.model_id)
+    if out.get("ok"):
+        _recheck_stt()
+    return out
+
+
 # 인터뷰 모드 번역 대상 언어.
 TRANSLATE_LANGS = [
     {"code": "en", "name": "English", "label": "English"},

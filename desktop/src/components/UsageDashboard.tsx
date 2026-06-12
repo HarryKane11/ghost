@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Gauge, Cpu, Cloud, HardDrive, RotateCcw, Coins } from "lucide-react";
+import { Gauge, Cpu, Cloud, HardDrive, RotateCcw, Coins, Trash2 } from "lucide-react";
 import * as api from "@/lib/api";
 
 const fmtNum = (n: number) => n.toLocaleString();
@@ -21,9 +21,20 @@ function Stat({ label, value }: { label: string; value: string }) {
 export function UsageDashboard({ t }: { t: (k: string) => string }) {
   const [u, setU] = useState<api.Usage | null>(null);
   const [budget, setBudget] = useState("");
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = () => api.getUsage().then((x) => { setU(x); if (x) setBudget(x.codex.budget_usd ? String(x.codex.budget_usd) : ""); });
   useEffect(() => { load(); }, []);
+
+  // 다운로드된 모델 캐시 삭제 — 앱 밖에서 경로 찾아 지우던 불편 해소 (이슈 #20).
+  const deleteModel = async (id: string) => {
+    if (!confirm(t("model.deleteConfirm"))) return;
+    setDeleting(id);
+    const r = await api.deleteSttModel(id);
+    setDeleting(null);
+    if (!r.ok) alert(`${t("model.deleteFailed")} — ${r.message || r.error || ""}`);
+    load();
+  };
 
   if (!u || !u.codex) return null;
   const c = u.codex;
@@ -102,8 +113,14 @@ export function UsageDashboard({ t }: { t: (k: string) => string }) {
           {u.local_models.map((m) => (
             <div key={m.id} className="flex items-center justify-between gap-2 text-[12px]">
               <span className="truncate text-charcoal" title={m.id}>{m.label.split(" · ")[0]}</span>
-              <span className={`shrink-0 tabular-nums ${m.present ? "text-steel" : "text-stone"}`}>
+              <span className={`flex shrink-0 items-center gap-1.5 tabular-nums ${m.present ? "text-steel" : "text-stone"}`}>
                 {m.present ? fmtGb(m.size_bytes) : `~${m.approx_gb}GB · ${t("usage.notDownloaded")}`}
+                {m.present && (
+                  <button onClick={() => deleteModel(m.id)} disabled={deleting === m.id} title={t("model.delete")}
+                    className="text-stone hover:text-[#b04141] disabled:opacity-40">
+                    <Trash2 className="size-3.5" />
+                  </button>
+                )}
               </span>
             </div>
           ))}

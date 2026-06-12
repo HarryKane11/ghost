@@ -10,6 +10,8 @@ from __future__ import annotations
 import concurrent.futures
 import importlib
 import importlib.util
+import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -181,7 +183,8 @@ def install_engine(target: str, on_done=None) -> dict:
 _active: dict = {"model": DEFAULT_STT_MODEL}
 
 # 모델 다운로드 상태(완전 로컬 에디션 첫 실행 흐름용). 패키징하지 않고 런타임에 받는다.
-_DL: dict = {"state": "idle", "error": None}  # idle | downloading | done | error
+# repo: 현재 받는 중인 HF repo — 삭제 요청과의 충돌 방지용.
+_DL: dict = {"state": "idle", "error": None, "repo": None}  # idle | downloading | done | error
 
 
 def active_model() -> str:
@@ -302,12 +305,24 @@ def warmup(model_path: Optional[str] = None) -> None:
 
 
 def _hf_cache_dir(repo: str) -> Path:
-    """해당 repo의 HuggingFace 캐시 폴더 경로."""
+    """해당 repo의 HuggingFace 캐시 폴더 경로.
+
+    huggingface_hub 미설치 fallback도 HF_HUB_CACHE·HF_HOME 환경변수를 존중해야 한다 —
+    이전엔 무조건 ~/.cache를 가리켜, 커스텀 캐시 사용자에게 잘못된 경로(용량 0 표시,
+    엉뚱한 폴더 삭제)를 줄 수 있었다.
+    """
     try:
         from huggingface_hub.constants import HF_HUB_CACHE
         base = Path(HF_HUB_CACHE)
     except Exception:  # noqa: BLE001
-        base = Path.home() / ".cache" / "huggingface" / "hub"
+        env_cache = os.environ.get("HF_HUB_CACHE", "").strip()
+        env_home = os.environ.get("HF_HOME", "").strip()
+        if env_cache:
+            base = Path(env_cache)
+        elif env_home:
+            base = Path(env_home) / "hub"
+        else:
+            base = Path.home() / ".cache" / "huggingface" / "hub"
     return base / ("models--" + repo.replace("/", "--"))
 
 
@@ -375,7 +390,7 @@ def start_download(model_path: Optional[str] = None, on_done=None) -> dict:
     repo = _repo(mp)
     if _DL["state"] == "downloading":
         return download_status(mp)
-    _DL.update(state="downloading", error=None)
+    _DL.update(state="downloading", error=None, repo=repo)
 
     def _w():
         try:
@@ -392,6 +407,41 @@ def start_download(model_path: Optional[str] = None, on_done=None) -> dict:
 
     threading.Thread(target=_w, daemon=True).start()
     return download_status(mp)
+
+
+def delete_model(model_id: str) -> dict:
+    """다운로드된 모델의 HF 캐시를 삭제해 디스크를 회수한다(이슈 #20).
+
+    받는 중인 repo는 거부(스레드가 파일을 다시 쓰며 부분 캐시가 남는다).
+    삭제 후 메모리에 로드된 모델 캐시도 비워 '디스크엔 없는데 동작'하는 불일치를 막는다.
+
+    Args:
+        model_id: 삭제할 모델 id (커스텀 HF repo 허용).
+
+    Returns:
+        {ok, deleted, freed_bytes} 또는 {ok: False, error}.
+    """
+    mid = (model_id or "").strip()
+    if not mid:
+        return {"ok": False, "error": "model_id required"}
+    repo = _repo(mid)
+    if _DL["state"] == "downloading" and _DL.get("repo") == repo:
+        return {"ok": False, "error": "downloading", "message": "다운로드 중인 모델은 삭제할 수 없어요."}
+    path = _hf_cache_dir(repo)
+    if not path.exists():
+        return {"ok": True, "deleted": False, "freed_bytes": 0}
+    freed = _dir_size(path)
+    try:
+        shutil.rmtree(path)
+    except OSError as ex:
+        return {"ok": False, "error": str(ex)}
+    # 로드된 모델 캐시 비우기 — maxsize가 1~2라 통째로 비워도 비용은 재로드 한 번뿐.
+    _mlx_model.cache_clear()
+    _fw_model.cache_clear()
+    _granite.cache_clear()
+    if mid == _active["model"]:
+        _DL.update(state="idle", error=None, repo=None)  # 활성 모델이면 '미다운로드'로 되돌림
+    return {"ok": True, "deleted": True, "freed_bytes": freed}
 
 
 def transcribe(audio_path: str, model_path: Optional[str] = None) -> str:
