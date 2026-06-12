@@ -8,10 +8,11 @@ Ghost가 저장한 회의록 전체(~/Ghost/meetings/)에 접근한다. 현재 �
 
 도구:
   list_meetings()             최근 회의 목록
-  get_meeting(id)             회의 1건(메타+요약+회의록+전사)
+  get_meeting(id)             회의 1건(메타+요약+회의록+채팅 Q&A+전사)
   search_meetings(query)      전체 회의 전사·요약·결정에서 검색
   get_transcript(id)          전사 평문
   get_summary(id)             롤링 요약(요약·결정·액션·미해결·용어·수치)
+  open_action_items()         최근 회의들의 액션 아이템·미해결 질문 횡단 수집
   current_meeting()           가장 최근(진행 중일 가능성) 회의
   append_note(id, text)       회의에 메모 남기기 (notes.jsonl append — 전사·회의록은 불변)
 
@@ -69,6 +70,29 @@ def append_note(meeting_id: str, text: str, author: str = "agent") -> bool:
     """회의에 메모를 남긴다(예: 후속 메일 발송됨, 티켓 ID 연결). 전사·회의록은 수정하지 않고
     notes.jsonl에만 누적된다. get_meeting 결과의 notes 필드로 함께 조회된다."""
     return store.append_note(meeting_id, text, author=author)
+
+
+@mcp.tool()
+def open_action_items(limit_meetings: int = 20) -> List[dict]:
+    """최근 회의들의 액션 아이템·미해결 질문을 회의 횡단으로 모아 반환.
+
+    "내가 할 일이 뭐였지?" 류 질문에 회의를 일일이 열지 않고 답할 수 있다.
+    액션도 미해결도 없는 회의는 제외된다.
+
+    Returns:
+        [{meeting_id, title, started_at, action_items, open_questions}] 최신순.
+    """
+    out: List[dict] = []
+    for m in store.list_meetings(limit=limit_meetings):
+        meta = store.get_meta(m["id"]) or {}
+        actions = meta.get("action_items") or []
+        questions = meta.get("open_questions") or []
+        if not actions and not questions:
+            continue
+        out.append({"meeting_id": m["id"], "title": meta.get("title"),
+                    "started_at": meta.get("started_at"),
+                    "action_items": actions, "open_questions": questions})
+    return out
 
 
 @mcp.tool()

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { X, FileAudio, Upload, Loader2, FileText, Play, Globe, ChevronDown } from "lucide-react";
+import { X, FileAudio, Upload, Loader2, FileText, Play, Globe, ChevronDown, Save, Check } from "lucide-react";
 import * as api from "@/lib/api";
 import { GenUI, type Spec } from "@/components/GenUI";
 import { GhostLogo } from "@/components/GhostLogo";
@@ -23,7 +23,7 @@ const SPK_COLORS = ["#0a7ea4", "#b06a00", "#6b8af0", "#7c3aed", "#d05757", "#00b
  */
 export function AudioView({
   open, onClose, isMac = false, t,
-  provider, models, onPickModel, transLangs, lang,
+  provider, models, onPickModel, transLangs, lang, onSaved,
 }: {
   open: boolean;
   onClose: () => void;
@@ -34,6 +34,7 @@ export function AudioView({
   onPickModel: (kind: "local" | "cloud", id: string) => void;
   transLangs: api.TransLang[];
   lang: string;
+  onSaved?: () => void;   // 회의 저장 후 회의 내역 갱신용
 }) {
   // 회의록 출력 언어(입력 음성과 무관) — 모드를 나갔다 와도 선택이 유지되게 영속.
   const [outLang, setOutLangState] = useState(() => {
@@ -52,10 +53,13 @@ export function AudioView({
   const [minBusy, setMinBusy] = useState(false);
   const [minProgress, setMinProgress] = useState<string>("");
   const [err, setErr] = useState("");
+  // 회의로 저장(#영속) — idle | saving | done
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "done">("idle");
 
   const fileRef = useRef<HTMLInputElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<(() => void) | null>(null);   // 진행 중 업로드 취소 핸들
+  const savedIdRef = useRef<string>("");                 // 저장된 회의 id — 이후 회의록 생성 시 거기에 붙인다
 
   const DRAG = { WebkitAppRegion: "drag" } as any;
   const NODRAG = { WebkitAppRegion: "no-drag" } as any;
@@ -72,11 +76,12 @@ export function AudioView({
     setFileName(file.name);
     if (audioUrl) URL.revokeObjectURL(audioUrl);
     setAudioUrl(URL.createObjectURL(file));
-    setSegments([]); setMinutes(null); setErr(""); setUpPct(0);
+    setSegments([]); setMinutes(null); setErr(""); setUpPct(0); setSaveState("idle"); savedIdRef.current = "";
     setPhase("transcribing");
     try {
       const r = await api.uploadAudio(file, setUpPct, (abort) => { abortRef.current = abort; });
-      if (!r.ok || !r.segments?.length) { setPhase("error"); setErr(t("audio.noText")); return; }
+      // 백엔드가 원인을 주면 그대로 보여준다(예: 로컬 STT 미설치 안내) — 이전엔 전부 "텍스트 없음"이었다.
+      if (!r.ok || !r.segments?.length) { setPhase("error"); setErr(r.error || t("audio.noText")); return; }
       setSegments(r.segments);
       setPhase("ready");
     } catch (e) {
@@ -95,11 +100,25 @@ export function AudioView({
     setMinBusy(true); setMinutes(null); setMinProgress(t("audio.minutesWorking"));
     api.streamAudioMinutes(segments, "", {
       onProgress: (p) => setMinProgress(p.text || ""),
-      onResult: (spec) => { setMinutes(spec); setMinBusy(false); },
+      onResult: (spec) => {
+        setMinutes(spec); setMinBusy(false);
+        // 이미 회의로 저장했다면, 새로 만든 회의록을 그 회의에 붙인다(중복 회의 생성 없이).
+        if (savedIdRef.current) void api.saveAudioAsMeeting({ meeting_id: savedIdRef.current, minutes: spec });
+      },
       onError: () => { setMinBusy(false); setMinProgress(t("audio.minutesFail")); },
     }, outLang);   // 출력 언어 강제
   };
   const langs = transLangs.length ? transLangs : [{ code: "ko", name: "Korean", label: "한국어" }, { code: "en", name: "English", label: "English" }] as api.TransLang[];
+
+  // 전사(+회의록)를 회의로 저장 — 회의 내역·검색·MCP에서 접근 가능해진다.
+  const saveAsMeeting = async () => {
+    if (!segments.length || saveState !== "idle") return;
+    setSaveState("saving");
+    const title = fileName.replace(/\.[^.]+$/, "").trim() || t("audio.title");
+    const r = await api.saveAudioAsMeeting({ title, segments, minutes, duration: audioRef.current?.duration || 0 });
+    if (r.ok) { savedIdRef.current = r.meeting?.id || ""; setSaveState("done"); onSaved?.(); }
+    else { setSaveState("idle"); setErr(r.error || t("audio.saveFail")); }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas">
@@ -120,10 +139,24 @@ export function AudioView({
           <button style={NODRAG} onClick={() => fileRef.current?.click()} className="h-8 shrink-0 rounded-lg border border-hairline px-3 text-[12px] font-medium text-steel hover:text-foreground">{t("audio.another")}</button>
         )}
         {phase === "ready" && (
-          <button style={NODRAG} onClick={genMinutes} disabled={minBusy}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-medium text-canvas disabled:opacity-50">
-            {minBusy ? <Loader2 className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />} {t("audio.makeMinutes")}
-          </button>
+          <>
+            {/* 회의로 저장 — 전사·회의록을 회의 내역에 영속(검색·MCP 접근 가능) */}
+            {saveState === "done" ? (
+              <span style={NODRAG} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-spark-soft px-3 text-[12px] font-medium text-spark-deep">
+                <Check className="size-3.5" /> {t("audio.saved")}
+              </span>
+            ) : (
+              <button style={NODRAG} onClick={saveAsMeeting} disabled={saveState === "saving"}
+                title={t("audio.saveHint")}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-hairline px-3 text-[12px] font-medium text-steel hover:text-foreground disabled:opacity-50">
+                {saveState === "saving" ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} {t("audio.save")}
+              </button>
+            )}
+            <button style={NODRAG} onClick={genMinutes} disabled={minBusy}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-medium text-canvas disabled:opacity-50">
+              {minBusy ? <Loader2 className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />} {t("audio.makeMinutes")}
+            </button>
+          </>
         )}
       </div>
 
@@ -161,6 +194,9 @@ export function AudioView({
           <button onClick={() => fileRef.current?.click()} className="rounded-lg border border-hairline px-3 py-1.5 text-[12.5px] text-steel hover:text-foreground">{t("audio.another")}</button>
         </div>
       ) : (
+        <div className="flex min-h-0 flex-1 flex-col">
+        {/* ready 상태에서의 일시적 오류(저장 실패 등) */}
+        {err && <div className="border-b border-hairline bg-surface-soft/60 px-4 py-1.5 text-[11.5px] text-[#b04141]">{err}</div>}
         <div className="flex min-h-0 flex-1">
           {/* 좌: 스크립트(타임스탬프 클릭 재생) */}
           <div className="flex w-1/2 min-h-0 flex-col border-r border-hairline">
@@ -205,6 +241,7 @@ export function AudioView({
               )}
             </div>
           </div>
+        </div>
         </div>
       )}
     </div>

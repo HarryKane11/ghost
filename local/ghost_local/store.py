@@ -552,8 +552,18 @@ def list_meetings(limit: int = 50) -> List[dict]:
     return out
 
 
+def _card_brief(card: dict) -> dict:
+    """질의응답 카드를 MCP 소비용 요약으로 — GenUI spec 전체 대신 질문·답 텍스트만."""
+    spec = card.get("spec") or {}
+    texts = [str(b.get("text", "")) for b in spec.get("blocks", [])
+             if isinstance(b, dict) and b.get("type") == "text"]
+    answer = (spec.get("spoken") or " ".join(texts)).strip()
+    return {"t": card.get("t"), "query": card.get("query"),
+            "title": spec.get("title"), "answer": answer[:500]}
+
+
 def get_meeting(meeting_id: str, include_transcript: bool = True) -> Optional[dict]:
-    """회의 1건 전체(메타 + 회의록 + 선택적 전사). MCP get_meeting용."""
+    """회의 1건 전체(메타 + 회의록 + 채팅 Q&A + 선택적 전사). MCP get_meeting용."""
     meta = get_meta(meeting_id)
     if meta is None:
         return None
@@ -564,6 +574,9 @@ def get_meeting(meeting_id: str, include_transcript: bool = True) -> Optional[di
     notes = read_notes(meeting_id)
     if notes:
         out["notes"] = notes
+    cards = read_cards(meeting_id)
+    if cards:
+        out["chat"] = [_card_brief(c) for c in cards]   # 회의 중 질의응답 기록(요약형)
     if include_transcript:
         out["transcript"] = transcript_text(meeting_id)
     return out
