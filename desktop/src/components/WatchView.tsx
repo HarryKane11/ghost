@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { X, MonitorPlay, Mic, MonitorSpeaker, Ear, Square, Send, Languages } from "lucide-react";
+import { X, MonitorPlay, Mic, MonitorSpeaker, Ear, Square, Send, Languages, Copy, Check } from "lucide-react";
 import * as api from "@/lib/api";
 import type { TransLang } from "@/lib/api";
 import { GhostLogo } from "@/components/GhostLogo";
@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 
 export type WatchCard = { id: string; query: string; ack?: string; status: "chat" | "working" | "done"; spec?: Spec };
 
-/** YouTube URL/ID에서 11자리 video id를 뽑는다. (watch?v= · youtu.be · embed · shorts) */
+/** YouTube URL/ID에서 11자리 video id를 뽑는다. (watch?v= · youtu.be · embed · shorts · live) */
 function parseVideoId(input: string): string {
   const s = (input || "").trim();
   if (!s) return "";
@@ -18,7 +18,8 @@ function parseVideoId(input: string): string {
     s.match(/[?&]v=([\w-]{11})/) ||
     s.match(/youtu\.be\/([\w-]{11})/) ||
     s.match(/\/embed\/([\w-]{11})/) ||
-    s.match(/\/shorts\/([\w-]{11})/);
+    s.match(/\/shorts\/([\w-]{11})/) ||
+    s.match(/\/live\/([\w-]{11})/);
   return m ? m[1] : "";
 }
 
@@ -73,6 +74,7 @@ export function WatchView({
   const langs = transLangs.length ? transLangs : FALLBACK_LANGS;
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const embedSrc = useMemo(
     () => (videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0` : ""),
@@ -83,6 +85,20 @@ export function WatchView({
 
   const loadUrl = () => { const id = parseVideoId(url); if (id) setVideoId(id); };
   const send = () => { const q = chatInput.trim(); if (!q) return; onAsk(q); setChatInput(""); };
+  // URL을 붙여넣으면 바로 로드 — 붙여넣고 버튼을 또 누르던 단계 제거.
+  const onPasteUrl = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const txt = e.clipboardData.getData("text");
+    const id = parseVideoId(txt);
+    if (id) { e.preventDefault(); setUrl(txt.trim()); setVideoId(id); }
+  };
+  // 스크립트(+현재 언어 번역)를 마크다운으로 복사.
+  const copyScript = async () => {
+    const md = transcript.map((ln) => {
+      const tr = translations[`${transLang}:${ln.id}`];
+      return tr ? `${ln.text}\n> ${tr}` : ln.text;
+    }).join("\n\n");
+    try { await navigator.clipboard.writeText(md); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas">
@@ -94,6 +110,7 @@ export function WatchView({
           style={NODRAG}
           value={url} onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") loadUrl(); }}
+          onPaste={onPasteUrl}
           placeholder={t("watch.urlPlaceholder")}
           className="h-8 min-w-0 flex-1 rounded-lg border border-hairline bg-surface-soft px-3 text-[12.5px] text-charcoal outline-none placeholder:text-stone focus:border-ink/40"
         />
@@ -139,6 +156,11 @@ export function WatchView({
               {active ? t("watch.live") : t("watch.idle")}
             </span>
             <div className="ml-auto flex items-center gap-1">
+              {/* 스크립트(+번역) 복사 — 영상 보고 끝나면 결과물을 들고 나갈 수 있게 */}
+              <button onClick={copyScript} disabled={!transcript.length} title={t("trans.copy")}
+                className="grid size-7 place-items-center rounded-lg text-stone hover:bg-surface hover:text-foreground disabled:opacity-40">
+                {copied ? <Check className="size-3.5 text-spark-deep" /> : <Copy className="size-3.5" />}
+              </button>
               <Languages className="size-3.5 text-stone" />
               <select value={transLang} onChange={(e) => setTransLang(e.target.value)}
                 className="h-7 rounded-lg border border-hairline bg-surface-soft px-1.5 text-[11.5px] text-charcoal outline-none focus:border-ink/40">

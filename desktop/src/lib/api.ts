@@ -453,7 +453,7 @@ export async function transcribe(blob: Blob, meetingId = "", source = "mic"): Pr
 
 // ── 음성 파일 업로드 모드 ────────────────────────────────────────────────────
 export type AudioSegment = { start: number; end: number; text: string; speaker?: number };
-export type AudioTranscript = { ok: boolean; segments: AudioSegment[]; provider?: string; model?: string; duration?: number };
+export type AudioTranscript = { ok: boolean; segments: AudioSegment[]; provider?: string; model?: string; duration?: number; error?: string };
 export async function uploadAudio(
   file: File,
   onProgress?: (pct: number) => void,
@@ -479,6 +479,13 @@ export async function uploadAudio(
 }
 export function streamAudioMinutes(segments: AudioSegment[], context: string, h: StreamHandlers, lang = "") {
   return streamSSE("/api/audio/minutes/stream", { segments, context, lang }, h);
+}
+/** 업로드 전사(+회의록)를 회의로 영속 저장 — 회의 내역·검색·MCP에서 접근 가능해진다. */
+export async function saveAudioAsMeeting(payload: { title?: string; segments?: AudioSegment[]; minutes?: Spec | null; duration?: number; meeting_id?: string }): Promise<{ ok: boolean; meeting?: MeetingMeta; error?: string }> {
+  try {
+    const r = await ghostFetch(`${BASE}/api/audio/save`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    return await r.json();
+  } catch (e) { return { ok: false, error: String(e) }; }
 }
 
 export async function ttsUrl(text: string): Promise<string> {

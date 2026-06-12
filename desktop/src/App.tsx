@@ -1545,7 +1545,8 @@ export default function App() {
 
       {/* 음성 파일 모드 — 업로드 → 타임스탬프 전사 + 재생 + 회의록(구간 재생 주석) */}
       <AudioView open={appMode === "audio"} onClose={goHome} isMac={isMacApp} t={t}
-        provider={status?.stt_provider} models={sttModelsList} onPickModel={pickModel} transLangs={transLangs} lang={lang} />
+        provider={status?.stt_provider} models={sttModelsList} onPickModel={pickModel} transLangs={transLangs} lang={lang}
+        onSaved={loadRecentMeetings} />
 
       <Onboarding
         open={onboard}

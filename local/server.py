@@ -1106,11 +1106,18 @@ def _fmt_ts(sec: float) -> str:
 @app.post("/api/audio/transcribe")
 async def audio_transcribe(audio_file: UploadFile = File(...)) -> dict:
     """업로드 음성(mp3/mp4/m4a/wav…) → 설정된 ASR로 타임스탬프 세그먼트 전사."""
+    # 로컬 경로(클라우드 키 없음 포함)로 갈 거면 엔진·모델 준비를 먼저 확인한다 —
+    # 이전엔 미설치 상태에서 청크 전사가 조용히 전부 실패해 "전사된 텍스트가 없어요"로 보였다.
+    provider = STATE.get("stt_provider", "elevenlabs")
+    if not (provider == "elevenlabs" and stt_cloud.elevenlabs_key()):
+        if not stt.engine_available(stt._engine(stt.active_model())):
+            return {"ok": False, "error": "로컬 STT 엔진 미설치 — 설정 > 음성 인식에서 '앱에서 설치' 후 다시 시도하세요."}
+        if not stt.model_present():
+            return {"ok": False, "error": "STT 모델 미다운로드 — 설정 > 음성 인식에서 모델을 받은 후 다시 시도하세요."}
     raw = _secure_tmp("ghost_audio_")
     with open(raw, "wb") as f:
         shutil.copyfileobj(audio_file.file, f)
     try:
-        provider = STATE.get("stt_provider", "elevenlabs")
         segs = audio.transcribe_segments(raw, provider, STATE.get("lang"), stt_cloud.elevenlabs_key())
         # ElevenLabs로 전사했으면 사용량 누적(전체 길이).
         try:
@@ -1126,6 +1133,44 @@ async def audio_transcribe(audio_file: UploadFile = File(...)) -> dict:
             os.unlink(raw)
         except OSError:
             pass
+
+
+class AudioSaveReq(BaseModel):
+    title: str = ""
+    segments: list = []        # [{start, end, text, speaker?}]
+    minutes: Optional[dict] = None
+    duration: float = 0
+    meeting_id: str = ""       # 지정 시 기존(이미 저장된) 회의에 회의록만 추가 — 중복 회의 방지
+
+
+@app.post("/api/audio/save")
+def audio_save(req: AudioSaveReq) -> dict:
+    """업로드 전사(+회의록)를 회의로 영속 저장.
+
+    이전엔 음성 파일 모드의 전사·회의록이 화면을 나가면 사라졌다. 저장하면 회의 내역에
+    나타나고, 검색·MCP(외부 에이전트)에서도 같은 회의로 접근할 수 있다.
+    meeting_id가 오면 새 회의를 만들지 않고 그 회의에 회의록만 붙인다(저장 후 회의록 생성 흐름).
+    """
+    if req.meeting_id:
+        if store.get_meta(req.meeting_id) is None:
+            return {"ok": False, "error": "회의를 찾지 못했어요."}
+        if req.minutes:
+            store.save_minutes(req.meeting_id, req.minutes)
+        return {"ok": True, "meeting": store.get_meta(req.meeting_id)}
+    segs = [s for s in (req.segments or []) if isinstance(s, dict) and (s.get("text") or "").strip()]
+    if not segs:
+        return {"ok": False, "error": "저장할 전사가 없어요."}
+    meta = store.create_meeting(backend=_backend_label(STATE["backend"]), lang=STATE.get("lang", "ko"))
+    mid = meta["id"]
+    if (req.title or "").strip():
+        store.set_title(mid, req.title.strip())
+    for s in segs:
+        spk = f"[화자{s['speaker']}] " if s.get("speaker") else ""
+        store.append_transcript(mid, f"[{_fmt_ts(s.get('start', 0))}] {spk}{s['text'].strip()}", source="upload")
+    if req.minutes:
+        store.save_minutes(mid, req.minutes)
+    store.end_meeting(mid)
+    return {"ok": True, "meeting": store.get_meta(mid)}
 
 
 class AudioMinutesReq(BaseModel):
