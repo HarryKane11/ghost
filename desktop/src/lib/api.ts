@@ -281,6 +281,13 @@ export async function getSttModel(): Promise<SttModel | null> {
 export async function downloadSttModel(): Promise<SttModel | null> {
   try { return await (await ghostFetch(`${BASE}/api/stt/model/download`, { method: "POST" })).json(); } catch { return null; }
 }
+export async function deleteSttModel(modelId: string): Promise<{ ok: boolean; error?: string; message?: string }> {
+  try {
+    const qs = new URLSearchParams({ model_id: modelId });
+    const r = await ghostFetch(`${BASE}/api/stt/model?${qs}`, { method: "DELETE" });
+    return await r.json();
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
 
 // 인터뷰 모드 번역
 export type TransLang = { code: string; name: string; label: string };
@@ -360,7 +367,7 @@ export async function setGlossary(items: GlossaryItem[]): Promise<GlossaryItem[]
   try { return (await (await ghostFetch(`${BASE}/api/glossary`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ glossary: items }) })).json()).glossary || []; } catch { return items; }
 }
 
-export type SttModelOption = { id: string; label: string; lang?: string; approx_gb?: number; engine?: string; streaming?: boolean; diarization?: boolean; engine_ready?: boolean; install?: string };
+export type SttModelOption = { id: string; label: string; lang?: string; approx_gb?: number; engine?: string; streaming?: boolean; diarization?: boolean; engine_ready?: boolean; install?: string; present?: boolean; size_bytes?: number };
 export type SttModels = { local: SttModelOption[]; local_active: string; cloud: SttModelOption[]; cloud_active: string };
 export type StreamKind = "elevenlabs" | "parakeet" | null;
 export function sttWsUrl(meetingId = "", source = "mic"): string {

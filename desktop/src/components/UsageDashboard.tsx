@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Gauge, Cpu, Cloud, HardDrive, RotateCcw, Coins } from "lucide-react";
+import { Gauge, Cpu, Cloud, HardDrive, RotateCcw, Coins, Trash2, Loader2 } from "lucide-react";
 import * as api from "@/lib/api";
 
 const fmtNum = (n: number) => n.toLocaleString();
@@ -18,9 +18,10 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /** 사용량·비용 대시보드 — Codex 토큰/비용/예산, ElevenLabs STT, 로컬 ASR 디스크. 관리자 화면 전용. */
-export function UsageDashboard({ t }: { t: (k: string) => string }) {
+export function UsageDashboard({ t }: { t: (k: string, vars?: Record<string, string>) => string }) {
   const [u, setU] = useState<api.Usage | null>(null);
   const [budget, setBudget] = useState("");
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = () => api.getUsage().then((x) => { setU(x); if (x) setBudget(x.codex.budget_usd ? String(x.codex.budget_usd) : ""); });
   useEffect(() => { load(); }, []);
@@ -38,6 +39,14 @@ export function UsageDashboard({ t }: { t: (k: string) => string }) {
     if (x) setU(x);
   };
   const reset = async () => { const x = await api.resetUsage(); if (x) { setU(x); setBudget(""); } };
+  const deleteModel = async (modelId: string, label: string) => {
+    if (!window.confirm(t("usage.deleteModelConfirm", { model: label }))) return;
+    setDeleting(modelId);
+    const r = await api.deleteSttModel(modelId);
+    setDeleting(null);
+    if (r.ok) load();
+    else alert(r.message || r.error || t("usage.deleteModelFail"));
+  };
 
   return (
     <div className="mb-4 rounded-xl border border-hairline p-3.5">
@@ -102,8 +111,17 @@ export function UsageDashboard({ t }: { t: (k: string) => string }) {
           {u.local_models.map((m) => (
             <div key={m.id} className="flex items-center justify-between gap-2 text-[12px]">
               <span className="truncate text-charcoal" title={m.id}>{m.label.split(" · ")[0]}</span>
-              <span className={`shrink-0 tabular-nums ${m.present ? "text-steel" : "text-stone"}`}>
-                {m.present ? fmtGb(m.size_bytes) : `~${m.approx_gb}GB · ${t("usage.notDownloaded")}`}
+              <span className="flex shrink-0 items-center gap-2">
+                <span className={`tabular-nums ${m.present ? "text-steel" : "text-stone"}`}>
+                  {m.present ? fmtGb(m.size_bytes) : `~${m.approx_gb}GB · ${t("usage.notDownloaded")}`}
+                </span>
+                {m.present && (
+                  <button onClick={() => deleteModel(m.id, m.label.split(" · ")[0])} disabled={deleting !== null}
+                    title={t("usage.deleteModel")}
+                    className="grid size-6 place-items-center rounded-md border border-hairline text-stone hover:bg-surface-soft hover:text-[#b04141] disabled:opacity-40">
+                    {deleting === m.id ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                  </button>
+                )}
               </span>
             </div>
           ))}

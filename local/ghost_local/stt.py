@@ -10,6 +10,7 @@ from __future__ import annotations
 import concurrent.futures
 import importlib
 import importlib.util
+import shutil
 import subprocess
 import sys
 import threading
@@ -344,6 +345,30 @@ def start_download(model_path: Optional[str] = None) -> dict:
 
     threading.Thread(target=_w, daemon=True).start()
     return download_status(mp)
+
+
+def delete_model(model_path: Optional[str] = None) -> dict:
+    """현재(또는 지정) 모델의 HuggingFace 캐시를 repo 단위로 삭제한다."""
+    mp = model_path or active_model()
+    repo = _repo(mp)
+    cache_dir = _hf_cache_dir(repo)
+    deleted = _dir_size(cache_dir)
+    if cache_dir.exists() or cache_dir.is_symlink():
+        if cache_dir.is_symlink() or cache_dir.is_file():
+            cache_dir.unlink()
+        else:
+            shutil.rmtree(cache_dir)
+    _mlx_model.cache_clear()
+    _fw_model.cache_clear()
+    _granite.cache_clear()
+    if repo == _repo(active_model()):
+        _DL.update(state="idle", error=None)
+    return {
+        "ok": True,
+        "repo": repo,
+        "present": False,
+        "deleted": deleted,
+    }
 
 
 def transcribe(audio_path: str, model_path: Optional[str] = None) -> str:
