@@ -748,6 +748,12 @@ def stt_model_download() -> dict:
     return stt.start_download(on_done=_recheck_stt)
 
 
+@app.delete("/api/stt/model")
+def stt_model_delete(model_id: Optional[str] = None) -> dict:
+    """현재 또는 지정한 로컬 ASR 모델의 HuggingFace 캐시 삭제."""
+    return stt.delete_model(model_id)
+
+
 # 인터뷰 모드 번역 대상 언어.
 TRANSLATE_LANGS = [
     {"code": "en", "name": "English", "label": "English"},
